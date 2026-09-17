@@ -1,0 +1,8 @@
+{
+  "name": "frame-and-reed",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Frame & Reed — design a 3D-printable jaw harp case from a photo or a stock size",
+  "scripts": { "build": "node build.js" },
+  "dependencies": { "esbuild": "^0.28.2", "fflate": "^0.8.3", "three": "0.170.0" }
+}

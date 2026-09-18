@@ -310,6 +310,7 @@ export function build(P) {
   const hb0 = bboxOf(allBay.flatMap(p => p.circle ? [{ x: p.circle[0] - p.circle[2], z: p.circle[1] - p.circle[2] }, { x: p.circle[0] + p.circle[2], z: p.circle[1] + p.circle[2] }] : p.poly));
   const chanPrims = style === 'sleeve' ? allBay.concat([rect(-hW / 2, hb0.minZ - 30, hW / 2, zRing)]) : allBay;
   const tabW = 18, holeR = 3.25, rT = 5;
+  const LASH = { hw: 1.7, hl: 2.6, off: 3.7, groove: 4.5, deep: 2 }; // slot half-width/half-length, offset from the pocket, groove half-width and depth
   const holdD = slideLatch ? latchDims(holdKind, clr, frameT, gap, wall) : null;
   // the bail tab must carry the whole spine bolt groove and still leave 1.5 mm before the bail hole
   const tabL = style === 'clam' ? 24 : holdKind === 'spine' && holdD ? Math.max(24, Math.ceil(holdD.tunnelEnd + 12.75 - wall + 1)) : 14;
@@ -375,15 +376,18 @@ export function build(P) {
   const pbx = { minX: pb.minX, maxX: pb.maxX }; // pocket extremes (widest at the bow)
   const lugPrims = [];
   const lugLen = 15.5, lugHalf = 6.5; // lug reaches 15.5 mm from the pocket edge; the wall already gives `wall` of that
-  if (holdKind === 'lash') { // a pad each side of the bow, big enough to carry a slot with 4 mm of material round it
-    const ext = 13, half = 9;
+  if (holdKind === 'lash') { // just enough pad each side to carry a slot: 2 mm of material inboard, 2.6 outboard
+    const ext = LASH.off + LASH.hw + 2.6, half = LASH.hl + LASH.hw + 3;
     lugPrims.push(rect(pbx.minX - ext + rT, zRing - half + rT, pbx.minX + 2, zRing + half - rT), rect(pbx.maxX - 2, zRing - half + rT, pbx.maxX + ext - rT, zRing + half - rT));
   }
   if (holdKind === 'twin' || holdKind === 'bladeTop') {
     const ext = holdKind === 'twin' ? Math.max(lugLen, holdD.chanEnd + 1.5) : Math.max(19, holdD.tunnelEnd + 3); // the lug always reaches past the channel's back wall / the tunnel's end
     lugPrims.push(rect(pbx.minX - ext + rT, zRing - lugHalf + rT, pbx.minX + 2, zRing + lugHalf - rT), rect(pbx.maxX - 2, zRing - lugHalf + rT, pbx.maxX + ext - rT, zRing + lugHalf - rT));
   }
-  const lashAt = holdKind === 'lash' ? [{ x: pbx.minX - 6.5, z: zRing }, { x: pbx.maxX + 6.5, z: zRing }] : [];
+  // Cord lashing: the slots sit right against the pocket wall so the cord comes up beside the harp, and a groove
+  // across the deck top sinks it below the frame's top face at both edges, so it clamps down instead of arching over.
+  const lashAt = holdKind === 'lash' ? [{ x: pbx.minX - LASH.off, z: zRing }, { x: pbx.maxX + LASH.off, z: zRing }] : [];
+  const lashGroove = holdKind === 'lash' ? maskOf(R, [rect(-2000, zRing - LASH.groove, 2000, zRing + LASH.groove)], 0) : null;
   const lugMask = lugPrims.length ? maskOf(R, lugPrims, rT) : null;
   let outerMask = outerNoTab; if (P.bail || style === 'clam' || holdKind === 'spine') outerMask = or(outerMask, maskOf(R, [tab], rT));
   if (lugMask) outerMask = or(outerMask, lugMask);
@@ -412,17 +416,17 @@ export function build(P) {
     // a deck layer: the outline with the pockets (and bail) as holes, or — when a notch joins a pocket to the outside — traced from a mask
     // a deck layer as a list of {shape, mask}: the plain outline with pockets as holes, or — when a notch is cut into it —
     // every solid piece of the (outline − pockets − notch) mask, islands included
-    const deckLayer = (notch) => {
-      if (!notch) { const d = shapeOf(outer); pockets.forEach(p => d.holes.push(pathOf(p))); lashAt.forEach(q => d.holes.push(pathOf(slotPts(q.x, q.z, 1.6, 3.6)))); addBail(d); return [{ shape: d, mask: outerMask }]; }
+    const deckLayer = (notch, noSlots) => {
+      if (!notch) { const d = shapeOf(outer); pockets.forEach(p => d.holes.push(pathOf(p))); if (!noSlots) lashAt.forEach(q => d.holes.push(pathOf(slotPts(q.x, q.z, LASH.hw, LASH.hl)))); addBail(d); return [{ shape: d, mask: outerMask }]; }
       const list = maskToShapes(R, and(and(outerMask, pocketMask, true), notch, true));
       list.sort((a, b) => b.mask.reduce((x, v) => x + v, 0) - a.mask.reduce((x, v) => x + v, 0));
-      lashAt.forEach(q => slotAt(list, q.x, q.z));
+      if (!noSlots) lashAt.forEach(q => slotAt(list, q.x, q.z));
       if (P.bail && list.length) holeAt(list, tabX, holeZ, holeR); // into whichever piece actually holds the bail tab (a hole outside its piece would be dropped by the triangulator and block the bail)
       return list;
     };
     const addLayer = (list, hgt, y, name, bt = 0, bb = 0) => list.forEach(l => g.add(slabB(l.shape, hgt, y, mats.body, name, bt, bb)));
     // a hole at (x, z) goes into whichever piece of the layer contains that point
-    const slotAt = (list, x, z) => { const [px, py] = R.toPx(x, z), k = (py | 0) * R.w + (px | 0); const l = list.find(q => q.mask[k]) || list[0]; if (l) l.shape.holes.push(pathOf(slotPts(x, z, 1.6, 3.6))); };
+    const slotAt = (list, x, z) => { const [px, py] = R.toPx(x, z), k = (py | 0) * R.w + (px | 0); const l = list.find(q => q.mask[k]) || list[0]; if (l) l.shape.holes.push(pathOf(slotPts(x, z, LASH.hw, LASH.hl))); };
     const holeAt = (list, x, z, r) => { const [px, py] = R.toPx(x, z), k = (py | 0) * R.w + (px | 0); const l = list.find(q => q.mask[k]) || list[0]; if (l) l.shape.holes.push(circlePath(x, z, r)); };
     addLayer(deckLayer(), floorT, 0, 'deck-floor', 0, 0.8);
     if (style === 'clam') {
@@ -433,7 +437,7 @@ export function build(P) {
       const dMid = deckLayer(), dUp = deckLayer(); sides.forEach(s => { holeAt(dMid, s.x, s.z, chamR); holeAt(dUp, s.x, s.z, pegR + 0.3); });
       addLayer(dMid, chamH, yC0, 'deck-chamber'); addLayer(dUp, Dlow - yC1, yC1, 'deck', 0.8, 0);
     } else {
-      buildHold(g, holdKind, { P, deckLayer, addLayer, frameTop, Dlow, floorT, xL: pbx.minX, xR: pbx.maxX, zRing, clr, frameT, wall, gap, R, tabX, zEnd: pb.minZ, footprint, outerNoTab, zStep, obNT, pb });
+      buildHold(g, holdKind, { P, deckLayer, addLayer, frameTop, Dlow, floorT, xL: pbx.minX, xR: pbx.maxX, zRing, clr, frameT, wall, gap, R, tabX, zEnd: pb.minZ, footprint, outerNoTab, zStep, obNT, pb, lashGroove, LASH });
     }
     if (roofed) {
       const hoodS = shapeOf(hood); if (hoodRing) pockets.forEach(p => hoodS.holes.push(pathOf(p))); g.add(slab(hoodS, D - Dlow, Dlow, mats.body, 'hood', bevel));
@@ -584,7 +588,13 @@ export function build(P) {
     h.position.x = dx; g.add(h); if (bi === 0) state.harpGroup = h;
   });
 
-  g.traverse(o => { if (o !== g) o.position.multiplyScalar(0.001); if (o.isMesh) o.geometry.scale(0.001, 0.001, 0.001); });
+  // mm -> metres for the preview. Sliding parts carry their two stop positions in userData, so those are millimetres
+  // too and have to come along, or the viewer animates them a thousand times too far.
+  g.traverse(o => {
+    if (o !== g) o.position.multiplyScalar(0.001);
+    if (o.isMesh) o.geometry.scale(0.001, 0.001, 0.001);
+    if (o.userData && o.userData.slide) { o.userData.base *= 0.001; o.userData.open *= 0.001; }
+  });
   const report = fitReport({ P, style, traced, trace, hb0, pb, zStep, zRoof, slideOut, trigger, tH, frameH, frameT, clr, floorT, feltT, Dlow, D, roofed, zRing, bowB, pocketMask, R, zc, holdKind });
   return { g, dims: { L: ob.maxZ - ob.minZ, W: ob.maxX - ob.minX, D: style === 'clam' ? D + 3 : D }, report };
 }
@@ -614,8 +624,9 @@ function latchDims(kind, clr, frameT, gap, wall) {
 // Cord lashing: no mechanism at all. The deck is plain, with a slot each side of the bow (cut in every layer by
 // deckLayer), and the owner threads their own cord over the frame. Nothing printed can wear out, snap or seize.
 function buildLash(g, c) {
-  const { deckLayer, addLayer, Dlow, floorT } = c;
-  addLayer(deckLayer(), Dlow - floorT, floorT, 'deck', 0.8, 0);
+  const { deckLayer, addLayer, Dlow, floorT, lashGroove, LASH } = c;
+  addLayer(deckLayer(), Dlow - floorT - LASH.deep, floorT, 'deck');
+  addLayer(deckLayer(lashGroove, true), LASH.deep, Dlow - LASH.deep, 'deck-top', 0.8, 0);
 }
 
 // Sliding cover: a plate that runs in a groove down both sides of the case and clicks shut over the bow. The plate
@@ -798,7 +809,7 @@ function fitReport(c) {
   }
   // 5b. what is actually holding the harp
   const holdNote = {
-    lash: 'The slots are the whole mechanism: thread 2-3 mm cord or shock cord up through one, over the frame bar and down the other, then tie it under the case. Nothing printed can wear out.',
+    lash: 'The slots are the whole mechanism, and they sit 2 mm off the pocket wall so the cord bears on the frame itself. Thread 2-3 mm cord or shock cord up through one, along the groove across the deck, down the other, and tie it under the case. The groove holds the cord below the top of the frame, so pulling it tight clamps the harp down.',
     slide: 'The cover prints flat beside the case. Slide it in from the open end until it clicks over the bump; slide it back off to get the harp out.',
     swing: 'Two turn-buttons on captive pegs. A firm quarter-turn frees each one after printing, and it clicks into place on a detent.',
   }[holdKind];

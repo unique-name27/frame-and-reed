@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { zipSync, strToU8 } from 'fflate';
-import { IN, PRESETS, state, build, sampleHarpImage, toSTL, toOBJ, parametricHarp } from './engine.js';
+import { IN, PRESETS, mats, state, build, sampleHarpImage, toSTL, toOBJ, parametricHarp } from './engine.js';
 import { openTracer, lastImage } from './tracer.js';
 
 const $ = id => document.getElementById(id);
@@ -73,7 +73,7 @@ const HOLDS = [
     '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M6 27h44v5H6z"/><path d="M8 27V15h40v12"/><circle cx="30" cy="20" r="5"/><path d="M4 20h20" stroke-width="3" stroke-linecap="round"/><path d="M6 15h10v-4H6z"/></svg>'],
   ['twin', 'Twin bolts', 'Two bolts in covered channels, one from each side. The most obvious of the sliding latches, and the most grip.',
     '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M6 27h44v5H6z"/><path d="M8 27V15h40v12"/><circle cx="28" cy="20" r="5"/><path d="M4 12h12v4H4zM40 12h12v4H40z"/><path d="M14 18h8M42 18h-8" stroke-width="3" stroke-linecap="round"/></svg>'],
-  ['lash', 'Cord lashing', 'Two slots and no mechanism. You thread your own cord or shock cord over the frame and tie it underneath. Nothing printed can break.',
+  ['lash', 'Cord lashing', 'Two slots hard against the pocket, joined by a groove across the deck. Your own cord sits in the groove, below the top of the frame, so pulling it tight clamps the harp down. Nothing printed can break.',
     '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M6 27h44v5H6z"/><path d="M8 27V15h40v12"/><circle cx="28" cy="20" r="5"/><rect x="11" y="16" width="3.5" height="9" rx="1.75"/><rect x="41.5" y="16" width="3.5" height="9" rx="1.75"/><path d="M12.7 16c1-5 30.6-5 30.6 0" stroke-dasharray="3 2.5"/></svg>'],
   ['slide', 'Sliding cover', 'A plate that slides in from the open end and clicks shut over the bow. Prints flat beside the case.',
     '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M6 27h44v5H6z"/><path d="M8 27V15h40v12"/><circle cx="34" cy="20" r="5" opacity=".45"/><rect x="18" y="12" width="32" height="7" rx="1.5"/><path d="M14 15.5H4M4 15.5l3.5-3.5M4 15.5l3.5 3.5" stroke-linecap="round"/></svg>'],
@@ -149,7 +149,7 @@ function rebuild() {
   let g, dims, report;
   try { ({ g, dims, report } = build(P)); }
   catch (e) { console.error(e); setStatus('That combination could not be built (' + (e.message || e) + '). The previous case is still shown — try a different setting.', true); return; }
-  current = g; lastDims = dims; lastReport = report; window.__scene = g; window.__report = report; window.__engine = { toSTL, toOBJ, build, THREE, state };
+  current = g; lastDims = dims; lastReport = report; window.__scene = g; window.__report = report; window.__engine = { toSTL, toOBJ, build, THREE, state }; window.__stage = stage;
   stage.setObject(g, !first);
   first = false;
   const mm = v => v.toFixed(0), inch = v => (v / IN).toFixed(2);
@@ -226,6 +226,14 @@ let queued = false;
 const rebuildSoon = () => { if (queued) return; queued = true; setTimeout(() => { queued = false; rebuild(); }, 0); };
 ids.concat('harp', 'bail').forEach(id => $(id).addEventListener('input', rebuildSoon));
 DIMS.forEach(id => $(id).addEventListener('input', () => { if (customised()) preset = ''; }));
+// See inside: most of the hardware lives inside the case (that is the point of hidden blades), so fade the shell
+// rather than move anything. The materials are shared, so one change covers every body part in the scene.
+const xray = $('xray');
+function applyXray() {
+  const on = xray.checked;
+  [mats.body, mats.felt].forEach(m => { m.transparent = on; m.opacity = on ? 0.16 : 1; m.depthWrite = !on; m.needsUpdate = true; });
+}
+xray.addEventListener('input', applyXray);
 $('reset').addEventListener('click', () => { stage.frame(); stage.controls.autoRotate = !reduced; });
 
 // ---------------- URL state (hash, so the link survives any host) ----------------

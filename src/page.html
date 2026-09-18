@@ -1,4 +1,4 @@
-<title>Frame & Reed</title>
+<title>Jaw Harp Case Generator</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -173,11 +173,7 @@ footer{padding:16px clamp(16px,3vw,32px) 28px;font-family:var(--mono);font-size:
 </style>
 
 <header class="mast">
-  <div>
-    <h1 class="brand">Frame <em>&amp;</em> Reed</h1>
-    <div class="tag">A case cut to your harp, in about a minute.</div>
-  </div>
-  <div class="meta">3D-printed in PETG · pocket 1.5 mm off the frame · STL &amp; OBJ</div>
+  <h1 class="brand">Jaw Harp Case Generator</h1>
 </header>
 
 <main class="tool">
@@ -185,15 +181,15 @@ footer{padding:16px clamp(16px,3vw,32px) 28px;font-family:var(--mono);font-size:
 
     <section class="step" id="s1">
       <h2><span class="num">01</span>Your harp</h2>
-      <p class="lede">For an exact fit, photograph your harp from straight above on plain paper. We find its outline; you type its length and every other dimension follows.</p>
+      <p class="lede">Lay the harp on a plain sheet of paper and photograph it from directly above. Type in how long it is, and the rest of the measurements come off the photo.</p>
       <div class="photo-row">
         <label class="btn primary" for="file">Photograph your harp<input id="file" type="file" accept="image/*" hidden></label>
         <button id="sample" class="btn ghost" type="button">See it on a sample</button>
       </div>
-      <p class="lede" style="margin:18px 0 10px">Or start from a stock size:</p>
+      <p class="lede" style="margin:18px 0 10px">Or start from one of these:</p>
       <div class="presets" id="presets"></div>
       <div class="traced" id="traced">
-        Pocket, hood and latches are cut from <b>your traced outline</b>. Trigger height, hood and wall still adjust below.
+        The pocket is cut from <b>your outline</b> now. Height, hood and wall still adjust below.
         <div class="row"><button id="retrace" class="btn" type="button">Retrace</button><button id="untrace" class="btn ghost" type="button">Back to stock sizes</button></div>
       </div>
       <details id="adjust">
@@ -212,7 +208,7 @@ footer{padding:16px clamp(16px,3vw,32px) 28px;font-family:var(--mono);font-size:
 
     <section class="step" id="s2">
       <h2><span class="num">02</span>The case</h2>
-      <p class="lede">Same pocket, five ways to hold the harp.</p>
+      <p class="lede">The pocket is the same in all of them. What changes is the shell, and how the harp is held in it.</p>
       <div class="styles" id="styles"></div>
       <div class="field only-multi" hidden><label for="bays">Harps in the rack <output id="o-bays"></output></label><input id="bays" type="range" min="2" max="5" step="1" value="3"></div>
       <div class="field only-hold" hidden><div class="lbl">How the harp is held</div><div class="styles" id="holds"></div></div>
@@ -229,7 +225,7 @@ footer{padding:16px clamp(16px,3vw,32px) 28px;font-family:var(--mono);font-size:
       <div class="fit" id="fit" aria-live="polite">
         <div class="fit-head"><span class="lbl">Fit check</span><span id="fit-sum" class="mono"></span></div>
         <ul id="fitlist"></ul>
-        <p class="note" style="margin-top:8px">Every case is checked against its harp as it is built: the roof over the trigger, the bow clear of the hood, the latches on the bar, and a simulated path for taking the harp out. Press <b>How it comes out</b> on the preview to watch it.</p>
+        <p class="note" style="margin-top:8px">These run again every time something changes. The last one walks the harp back out of the case, point by point: it is easy to draw a case that traps the harp and hard to spot by eye. Press <b>How it comes out</b> to watch it.</p>
       </div>
     </section>
 
@@ -246,13 +242,13 @@ footer{padding:16px clamp(16px,3vw,32px) 28px;font-family:var(--mono);font-size:
         <div class="row" style="display:flex;gap:8px;margin-top:8px"><input id="code" class="text" type="text" placeholder="Paste a design code" spellcheck="false" autocomplete="off"><button id="load" class="btn" type="button">Load</button></div>
       </details>
       <p class="status" id="status" aria-live="polite"></p>
-      <p class="note">The STL is z-up, in millimetres, with every part already sitting on the bed (the clamshell comes as two files, base and lid). The zip adds an OBJ + MTL with every part named and a card of your settings. Every latch, the sleeve gate and the lid bolt print in place — no supports, no assembly. The clamshell is two prints joined by a filament pin. The harp and felt are preview only and are left out of the print files.</p>
+      <p class="note">The STL is z-up, in millimetres, already sitting on the bed. Some styles come as more than one piece: the clamshell as a base and a lid in two files, the sliding cover as a plate laid out beside the case. The zip adds an OBJ with every part named and a text file of your settings. The harp and the felt are preview only, so they are not in the file.</p>
     </section>
   </div>
 
   <div class="stage-wrap">
     <div id="stage" aria-label="3D preview of the case"></div>
-    <div class="hint" id="hint">Drag to orbit · scroll to zoom · click a button, the bolt or the lid to work it</div>
+    <div class="hint" id="hint">Drag to spin it around. Click a latch or the lid to work it.</div>
     <div class="hud tl">
       <label class="chip"><input id="harp" type="checkbox" checked> Show harp</label>
       <label class="chip only-buttons"><input id="lock" type="checkbox" checked> Latched</label>
@@ -265,9 +261,9 @@ footer{padding:16px clamp(16px,3vw,32px) 28px;font-family:var(--mono);font-size:
 
 <section class="more">
   <div>
-    <h3>How the fit works</h3>
-    <p>Every case starts from the harp's outline. The pocket is that outline grown by the clearance you set, the hood rises only around the trigger, and the deck sits 1.5 mm over the frame so the case stays as thin as the harp allows.</p>
-    <p>A photo works best shot straight down on plain paper with the harp flat and nothing else in frame; the outline is then scaled by the length you type, so measure that once with a ruler. Two things a photo cannot see, so type them: the harp's height lying flat, underside to the tip of the trigger, and the thickness of its frame. Stock sizes follow the real families: the round forged bow of European harps and the morchang, the flat stamped oval of Hohner-pattern frames, and the long loop of the Yakut khomus and bass harps. For anything else, photograph the harp from above on graph paper and trace one side — harps are symmetrical, so the other side is mirrored.</p>
+    <h3>About the fit</h3>
+    <p>It all comes from the outline of your harp. The pocket is that outline plus whatever clearance you set, the hood only rises where the trigger is, and the deck sits 1.5 mm over the frame, so the case is no thicker than it has to be.</p>
+    <p>Photos work best on plain paper, harp lying flat, nothing else in the shot. The outline gets scaled by the length you type in, so measure that one dimension properly and the rest follows. Two things a photo cannot see, so you type those as well: how tall the harp is lying flat, underside to the tip of the trigger, and how thick the frame is. The stock sizes follow the real families, so a forged European bow, a stamped Hohner-pattern frame or a Yakut khomus will land close. If yours is none of them, trace one side by hand and the other side mirrors.</p>
   </div>
   <div>
     <h3>Specification</h3>
@@ -277,8 +273,10 @@ footer{padding:16px clamp(16px,3vw,32px) 28px;font-family:var(--mono);font-size:
       <dt>Wall</dt><dd>6 mm default (3–10)</dd>
       <dt>Clearance</dt><dd>1.5 mm default (0.5–3)</dd>
       <dt>Lining</dt><dd>0.6 mm wool felt, glued</dd>
-      <dt>Holding the harp</dt><dd>slide latches over the frame bar: hidden 1.6 mm blades in a tunnel, or 5 × 3 mm bolts in roofed channels; two-position detent</dd>
-      <dt>Rack buttons</dt><dd>captive turn-buttons, Ø4 peg, Ø6 head in a chamber, sweep recessed</dd>
+      <dt>Sliding latches</dt><dd>1.6 mm blades in a tunnel, or 5 × 3 mm bolts in covered channels; detent at each end of the travel</dd>
+      <dt>Turn-buttons</dt><dd>7 × 3 mm bar on a captive Ø4 peg, Ø6 head in a chamber</dd>
+      <dt>Cord lashing</dt><dd>3.2 × 10 mm slots, 4.9 mm of material either side; cord is yours to supply</dd>
+      <dt>Sliding cover</dt><dd>2.4 mm plate in a 3 mm groove, detent bump behind the pocket</dd>
       <dt>Hood roof</dt><dd>3 mm, over the trigger end; the harp slides back out from under it</dd>
       <dt>Sleeve gate</dt><dd>captive turn-button at the mouth</dd>
       <dt>Lid latch</dt><dd>5 × 3 mm sliding bolt in a roofed channel, 6 mm throw into a keeper tunnel</dd>
@@ -287,12 +285,14 @@ footer{padding:16px clamp(16px,3vw,32px) 28px;font-family:var(--mono);font-size:
     </dl>
   </div>
   <div>
-    <h3>Printing it yourself</h3>
-    <p>Slice each STL as it comes, flat on the bed, no supports, 0.4 mm nozzle, 0.2 mm layers — at that height the 0.4 mm print gap is exactly two layers of air above and below every moving part. The file is a set of closed, overlapping solids; leave your slicer's union of overlapping shells on (it is the default in PrusaSlicer, Bambu Studio and Cura). Every moving part is separated from the body by the print gap — 0.4 mm is right for most printers in PLA; PETG likes to weld across small gaps, so print the first one in PLA or set the gap to 0.5. After printing, a firm quarter-turn breaks each button free; it then clicks into its locked position on a small detent. The clamshell comes as base and lid, both printed flat; a length of 1.75 mm filament pushed through the knuckles and trimmed flush makes the hinge pin.</p>
-    <p>A design code carries every setting, including a traced outline, so someone else can load it here and print the same case. It is also written into the README in your zip.</p>
+    <h3>Printing it</h3>
+    <p>Slice it as it comes: flat on the bed, no supports, 0.4 mm nozzle, 0.2 mm layers. At that layer height the 0.4 mm print gap works out to exactly two layers of air above and below anything that moves. Leave the slicer's union of overlapping shells switched on. It is the default in PrusaSlicer, Bambu Studio and Cura, and the file counts on it.</p>
+    <p>Print the first one in PLA. PETG likes to weld itself across small gaps and you can end up with a latch that never frees; if you want PETG anyway, set the print gap to 0.5 first. A latch that will not shift usually just needs a firmer push, since the first movement has to break the print skin.</p>
+    <p>The clamshell prints as a base and a lid, and a short piece of 1.75 mm filament through the hinge knuckles, snipped flush, is the pin. The sliding cover prints flat beside the case and slides in afterwards. Cord lashing needs about 300 mm of 2 to 3 mm cord, or shock cord if you would rather it snapped back.</p>
+    <p>A design code is the whole design as one line of text, traced outline and all. Paste someone else's in and you get their case.</p>
   </div>
 </section>
-<footer><span>Frame &amp; Reed · free to use · the models are yours to keep</span><span>Preview built in three.js</span></footer>
+<footer><span>Free to use. The models are yours.</span><span>Preview built with three.js</span></footer>
 
 <div id="tracer" hidden>
   <div id="tbar">
@@ -314,7 +314,7 @@ footer{padding:16px clamp(16px,3vw,32px) 28px;font-family:var(--mono);font-size:
   // Surface anything that goes wrong instead of a silent blank stage.
   (function () {
     var boot = document.getElementById('boot');
-    function fail(msg) { boot.hidden = false; boot.className = 'err'; boot.textContent = 'Frame & Reed could not start: ' + msg + ' — reload the page, or tell us what this says.'; }
+    function fail(msg) { boot.hidden = false; boot.className = 'err'; boot.textContent = 'This did not start: ' + msg + '. Try reloading the page.'; }
     window.addEventListener('error', function (e) { if (!window.__ready) fail(e.message || 'script error'); });
     window.addEventListener('unhandledrejection', function (e) { if (!window.__ready) fail((e.reason && e.reason.message) || 'a script failed to load'); });
     setTimeout(function () { if (!window.__ready && boot.className !== 'err') boot.textContent = 'Still loading the 3D preview — a slow connection can take a few more seconds…'; }, 8000);

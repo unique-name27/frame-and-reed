@@ -160,6 +160,13 @@ function cleanPoly(pts) {
 }
 function shapeOf(pts) { pts = cleanPoly(pts); const s = new THREE.Shape(); pts.forEach((p, i) => i ? s.lineTo(p.x, p.z) : s.moveTo(p.x, p.z)); s.closePath(); return s; }
 function circlePath(x, z, r) { const h = new THREE.Path(); h.moveTo(x + r, z); h.absarc(x, z, r, 0, Math.PI * 2, true); return h; }
+// a rounded slot (stadium) centred on (x, z), running along z
+function slotPts(x, z, hw, hl, n = 10) {
+  const pts = [];
+  for (let i = 0; i <= n; i++) { const a = Math.PI * i / n; pts.push({ x: x + hw * Math.cos(a), z: z + hl + hw * Math.sin(a) }); }
+  for (let i = 0; i <= n; i++) { const a = Math.PI + Math.PI * i / n; pts.push({ x: x + hw * Math.cos(a), z: z - hl + hw * Math.sin(a) }); }
+  return pts;
+}
 function pathOf(pts) { pts = cleanPoly(pts); const s = new THREE.Path(); pts.forEach((p, i) => i ? s.lineTo(p.x, p.z) : s.moveTo(p.x, p.z)); s.closePath(); return s; }
 export function bboxOf(pts) { const b = { minX: 1e9, maxX: -1e9, minZ: 1e9, maxZ: -1e9 }; for (const p of pts) { b.minX = Math.min(b.minX, p.x); b.maxX = Math.max(b.maxX, p.x); b.minZ = Math.min(b.minZ, p.z); b.maxZ = Math.max(b.maxZ, p.z); } return b; }
 const rect = (x1, z1, x2, z2) => ({ poly: [{ x: x1, z: z1 }, { x: x2, z: z1 }, { x: x2, z: z2 }, { x: x1, z: z2 }] });
@@ -279,10 +286,12 @@ export function build(P) {
   // print-in-place: every moving part is separated from the body by `gap` of air; the captive head lives in a chamber between yC0 and yC1
   const gap = Math.min(0.6, Math.max(0.3, P.gap || 0.4)), pegR = 2, headR = 3, headH = 1.6, chamR = headR + gap, yC0 = floorT, chamH = headH + 2 * gap, yC1 = yC0 + chamH;
   const { locks, buttons } = state; const trace = state.trace;
+  buttons.length = 0; // every clickable moving part registers here as it is built
   const g = new THREE.Group(); g.name = 'jaw-harp-case'; state.lidGroup = null; state.harpGroup = null;
-  const HOLDS = ['bladeSide', 'bladeTop', 'spine', 'twin'];
+  const HOLDS = ['bladeSide', 'bladeTop', 'spine', 'twin', 'lash', 'slide', 'swing'];
   const holdKind = style === 'deck' || style === 'pendant' ? (HOLDS.includes(P.hold) ? P.hold : 'bladeSide') : null;
   const bladeHold = holdKind === 'bladeSide' || holdKind === 'bladeTop';
+  const slideLatch = bladeHold || holdKind === 'spine' || holdKind === 'twin'; // the four sliding-latch holds share one set of dimensions
   const hasButtons = style === 'multi'; // the rack keeps captive turn-buttons (with a recess for the pad's sweep)
 
   let harpPrims, bayPrims, framePrims, holePrims, windows, trigger, reedW, frameT, hL, hW, zRing, armL, span, zNeck, zTip, bowB, zBack;
@@ -301,7 +310,7 @@ export function build(P) {
   const hb0 = bboxOf(allBay.flatMap(p => p.circle ? [{ x: p.circle[0] - p.circle[2], z: p.circle[1] - p.circle[2] }, { x: p.circle[0] + p.circle[2], z: p.circle[1] + p.circle[2] }] : p.poly));
   const chanPrims = style === 'sleeve' ? allBay.concat([rect(-hW / 2, hb0.minZ - 30, hW / 2, zRing)]) : allBay;
   const tabW = 18, holeR = 3.25, rT = 5;
-  const holdD = (style === 'deck' || style === 'pendant') ? latchDims(holdKind, clr, frameT, gap, wall) : null;
+  const holdD = slideLatch ? latchDims(holdKind, clr, frameT, gap, wall) : null;
   // the bail tab must carry the whole spine bolt groove and still leave 1.5 mm before the bail hole
   const tabL = style === 'clam' ? 24 : holdKind === 'spine' && holdD ? Math.max(24, Math.ceil(holdD.tunnelEnd + 12.75 - wall + 1)) : 14;
   const R = makeRaster(hb0, clr + wall + tabL + 12);
@@ -336,6 +345,9 @@ export function build(P) {
   let bodyMask = maskOf(R, footprint, clr + wall); if (style === 'sleeve') bodyMask = rowsCut(bodyMask, R, zc, true);
   if (style === 'sleeve') {
     sides.push({ x: -(hW / 2 + clr + gateOff), z: zc - 3, sg: -1, gate: true });
+  } else if (holdKind === 'swing') {
+    // a turn-button each side of the bow, on the same captive Ø4 peg the rack uses — the stoutest thing here
+    sides.push({ x: pb.minX - pivotOff, z: zRing, sg: -1 }, { x: pb.maxX + pivotOff, z: zRing, sg: 1 });
   } else if (hasButtons) {
     if (traced) { /* rack never uses a traced outline */
       const wide = pockets[0].filter(p => p.z < zStep - 6);
@@ -363,10 +375,15 @@ export function build(P) {
   const pbx = { minX: pb.minX, maxX: pb.maxX }; // pocket extremes (widest at the bow)
   const lugPrims = [];
   const lugLen = 15.5, lugHalf = 6.5; // lug reaches 15.5 mm from the pocket edge; the wall already gives `wall` of that
+  if (holdKind === 'lash') { // a pad each side of the bow, big enough to carry a slot with 4 mm of material round it
+    const ext = 13, half = 9;
+    lugPrims.push(rect(pbx.minX - ext + rT, zRing - half + rT, pbx.minX + 2, zRing + half - rT), rect(pbx.maxX - 2, zRing - half + rT, pbx.maxX + ext - rT, zRing + half - rT));
+  }
   if (holdKind === 'twin' || holdKind === 'bladeTop') {
     const ext = holdKind === 'twin' ? Math.max(lugLen, holdD.chanEnd + 1.5) : Math.max(19, holdD.tunnelEnd + 3); // the lug always reaches past the channel's back wall / the tunnel's end
     lugPrims.push(rect(pbx.minX - ext + rT, zRing - lugHalf + rT, pbx.minX + 2, zRing + lugHalf - rT), rect(pbx.maxX - 2, zRing - lugHalf + rT, pbx.maxX + ext - rT, zRing + lugHalf - rT));
   }
+  const lashAt = holdKind === 'lash' ? [{ x: pbx.minX - 6.5, z: zRing }, { x: pbx.maxX + 6.5, z: zRing }] : [];
   const lugMask = lugPrims.length ? maskOf(R, lugPrims, rT) : null;
   let outerMask = outerNoTab; if (P.bail || style === 'clam' || holdKind === 'spine') outerMask = or(outerMask, maskOf(R, [tab], rT));
   if (lugMask) outerMask = or(outerMask, lugMask);
@@ -396,25 +413,27 @@ export function build(P) {
     // a deck layer as a list of {shape, mask}: the plain outline with pockets as holes, or — when a notch is cut into it —
     // every solid piece of the (outline − pockets − notch) mask, islands included
     const deckLayer = (notch) => {
-      if (!notch) { const d = shapeOf(outer); pockets.forEach(p => d.holes.push(pathOf(p))); addBail(d); return [{ shape: d, mask: outerMask }]; }
+      if (!notch) { const d = shapeOf(outer); pockets.forEach(p => d.holes.push(pathOf(p))); lashAt.forEach(q => d.holes.push(pathOf(slotPts(q.x, q.z, 1.6, 3.6)))); addBail(d); return [{ shape: d, mask: outerMask }]; }
       const list = maskToShapes(R, and(and(outerMask, pocketMask, true), notch, true));
       list.sort((a, b) => b.mask.reduce((x, v) => x + v, 0) - a.mask.reduce((x, v) => x + v, 0));
+      lashAt.forEach(q => slotAt(list, q.x, q.z));
       if (P.bail && list.length) holeAt(list, tabX, holeZ, holeR); // into whichever piece actually holds the bail tab (a hole outside its piece would be dropped by the triangulator and block the bail)
       return list;
     };
     const addLayer = (list, hgt, y, name, bt = 0, bb = 0) => list.forEach(l => g.add(slabB(l.shape, hgt, y, mats.body, name, bt, bb)));
     // a hole at (x, z) goes into whichever piece of the layer contains that point
+    const slotAt = (list, x, z) => { const [px, py] = R.toPx(x, z), k = (py | 0) * R.w + (px | 0); const l = list.find(q => q.mask[k]) || list[0]; if (l) l.shape.holes.push(pathOf(slotPts(x, z, 1.6, 3.6))); };
     const holeAt = (list, x, z, r) => { const [px, py] = R.toPx(x, z), k = (py | 0) * R.w + (px | 0); const l = list.find(q => q.mask[k]) || list[0]; if (l) l.shape.holes.push(circlePath(x, z, r)); };
     addLayer(deckLayer(), floorT, 0, 'deck-floor', 0, 0.8);
     if (style === 'clam') {
       addLayer(deckLayer(), Dlow - floorT, floorT, 'deck', 0.8, 0);
-    } else if (style === 'multi') {
+    } else if (style === 'multi' || holdKind === 'swing') {
       // rack: captive turn-buttons. The pocket floor is 1.5 mm higher than in the other styles, so the frame's top sits at the
       // deck surface and the bar itself bears on it — no pad hanging below the deck, nothing to sweep through.
       const dMid = deckLayer(), dUp = deckLayer(); sides.forEach(s => { holeAt(dMid, s.x, s.z, chamR); holeAt(dUp, s.x, s.z, pegR + 0.3); });
       addLayer(dMid, chamH, yC0, 'deck-chamber'); addLayer(dUp, Dlow - yC1, yC1, 'deck', 0.8, 0);
     } else {
-      buildHold(g, holdKind, { P, deckLayer, addLayer, frameTop, Dlow, xL: pbx.minX, xR: pbx.maxX, zRing, clr, frameT, wall, gap, R, tabX, zEnd: pb.minZ });
+      buildHold(g, holdKind, { P, deckLayer, addLayer, frameTop, Dlow, floorT, xL: pbx.minX, xR: pbx.maxX, zRing, clr, frameT, wall, gap, R, tabX, zEnd: pb.minZ, footprint, outerNoTab, zStep, obNT, pb });
     }
     if (roofed) {
       const hoodS = shapeOf(hood); if (hoodRing) pockets.forEach(p => hoodS.holes.push(pathOf(p))); g.add(slab(hoodS, D - Dlow, Dlow, mats.body, 'hood', bevel));
@@ -434,7 +453,6 @@ export function build(P) {
 
   // turn-buttons, print-in-place captive pivot
   const barW = 7, barT = 3, padH = Dlow + gap - (floorT + feltT + frameH + gap);
-  buttons.length = 0;
   sides.forEach((s, k) => {
     const reach = s.gate ? hW / 2 + clr + gateOff : s.double ? (wall + 3) / 2 + clr + frameT + 3 : pivotOff + clr + frameT + 3;
     const bar = new THREE.Shape(); const x0 = s.double ? -reach : 0;
@@ -593,9 +611,50 @@ function latchDims(kind, clr, frameT, gap, wall) {
   const chanEnd = openPos + bL + gap + wallC; // back wall of a bolt channel
   return { blade, f, wallC, over, openPos, lockPos, travel, bumpZ, uA, uB, rn, bL, tunnelEnd, chanEnd };
 }
+// Cord lashing: no mechanism at all. The deck is plain, with a slot each side of the bow (cut in every layer by
+// deckLayer), and the owner threads their own cord over the frame. Nothing printed can wear out, snap or seize.
+function buildLash(g, c) {
+  const { deckLayer, addLayer, Dlow, floorT } = c;
+  addLayer(deckLayer(), Dlow - floorT, floorT, 'deck', 0.8, 0);
+}
+
+// Sliding cover: a plate that runs in a groove down both sides of the case and clicks shut over the bow. The plate
+// prints flat beside the case (it would have to bridge the whole open pocket if it printed in place) and slides in
+// from the open end afterwards.
+function buildSlideCover(g, c) {
+  const { P, deckLayer, addLayer, Dlow, floorT, gap, R, footprint, outerNoTab, clr, wall, zStep, obNT, pb } = c;
+  const { locks, buttons } = state;
+  const railW = 3, lipIn = 1.2, coverT = 2.4, lipT = 1.6, off = clr + wall; // off: the pocket-to-outer-edge offset
+  addLayer(deckLayer(), Dlow - floorT, floorT, 'deck', 0.8, 0);
+  const zMouth = obNT.minZ + 7; // the last 7 mm at the open end carry no rail, so the cover (and its thumb rib) can leave
+  const rail = m => rowsCut(rowsCut(m, R, zStep, false), R, zMouth, true);
+  const zD = pb.minZ - 1.2, rB = 1.2; // detent: a bump on the deck behind the pocket, a hole in the cover over it
+  const coverM = and(rowsCut(maskOf(R, footprint, off - railW), R, zStep - gap, false), maskOf(R, [{ circle: [0, zD, rB + gap] }], 0), true);
+  const sideM = rail(and(outerNoTab, maskOf(R, footprint, off - railW + gap), true)); // walls either side of the plate
+  const lipM = rail(and(outerNoTab, maskOf(R, footprint, off - railW - lipIn), true)); // lip that overhangs it
+  const yLip = Dlow + 2 * gap + coverT;
+  maskToShapes(R, sideM).forEach(l => g.add(slab(l.shape, yLip - Dlow, Dlow, mats.body, 'cover-rail')));
+  maskToShapes(R, lipM).forEach(l => g.add(slab(l.shape, lipT, yLip, mats.body, 'cover-lip', 0.6)));
+  const bump = new THREE.Mesh(new THREE.CylinderGeometry(rB, rB, gap + 0.3, 16), mats.body);
+  bump.position.set(0, Dlow + (gap + 0.3) / 2 - 0.02, zD); bump.name = 'cover-detent'; g.add(bump);
+  const pieces = maskToShapes(R, coverM); if (!pieces.length) return;
+  const cb = bboxOf(contour(R, coverM)), yCov = Dlow + gap;
+  const cover = slab(pieces[0].shape, coverT, yCov, mats.accent, 'cover', 0);
+  const rib = new THREE.Mesh(new THREE.BoxGeometry(Math.min(14, (cb.maxX - cb.minX) * 0.6), 2.2, 2.6), mats.accent);
+  rib.position.set(0, yCov + coverT + 1.1, cb.minZ + 1.5); rib.name = 'cover-thumb'; cover.add(rib);
+  const travel = zStep - cb.minZ + 4;
+  cover.userData = { button: 0, slide: true, base: 0, open: -travel };
+  if (P.printPose) cover.position.set(obNT.maxX - cb.minX + 8, -yCov, 0); // flat on the bed, beside the case
+  else cover.position.z = (locks[0] ?? true) ? 0 : -travel;
+  buttons[0] = cover; while (locks.length < 1) locks.push(true);
+  g.add(cover);
+}
+
 function buildHold(g, kind, c) {
+  if (kind === 'lash') return buildLash(g, c);
+  if (kind === 'slide') return buildSlideCover(g, c);
   const { P, deckLayer, addLayer, frameTop, Dlow, xL, xR, zRing, clr, frameT, wall, gap, R, tabX, zEnd } = c;
-  const { locks, buttons } = state; buttons.length = 0;
+  const { locks, buttons } = state;
   const yBot = frameTop + gap;
   const { blade, f, wallC, openPos, lockPos, bumpZ, uA, uB, rn, bL, tunnelEnd } = latchDims(kind, clr, frameT, gap, wall);
   const bW = blade ? 8 : 5, bT = blade ? 1.6 : 3, nHalf = bW / 2 + gap + 0.15; // notch half-width (+0.15 for contour rounding)
@@ -672,7 +731,7 @@ export function toSTL(g, part) {
   const meshes = printMeshes(g, part); let n = 0;
   const geos = meshes.map(m => { const ge = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry; n += ge.attributes.position.count / 3; return ge; });
   const buf = new ArrayBuffer(84 + n * 50), dv = new DataView(buf);
-  const hdr = 'Frame & Reed jaw harp case — millimetres'; for (let i = 0; i < 80; i++) dv.setUint8(i, i < hdr.length ? hdr.charCodeAt(i) : 0);
+  const hdr = 'Jaw harp case, millimetres'; for (let i = 0; i < 80; i++) dv.setUint8(i, i < hdr.length ? hdr.charCodeAt(i) : 0);
   dv.setUint32(80, n, true);
   let off = 84, skipped = 0; const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), nn = new THREE.Vector3();
   let yMin = Infinity; meshes.forEach((m, k) => { const pos = geos[k].attributes.position; for (let i = 0; i < pos.count; i++) yMin = Math.min(yMin, a.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld).y * 1000); });
@@ -695,7 +754,7 @@ export function toSTL(g, part) {
 }
 export function toOBJ(g) {
   const meshes = printMeshes(g); let base = 1; const v = new THREE.Vector3();
-  const lines = ['# Frame & Reed jaw harp case — millimetres, y up', 'mtllib case.mtl'];
+  const lines = ['# Jaw harp case, millimetres, y up', 'mtllib case.mtl'];
   const used = new Set();
   meshes.forEach(m => {
     const ge = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry, pos = ge.attributes.position;
@@ -737,6 +796,14 @@ function fitReport(c) {
     const frac = (wz - bb.minZ) / (bb.maxZ - bb.minZ); // 0 = bow end, 1 = trigger end
     add('orientation', frac < 0.55, 'warn', frac < 0.55 ? 'The widest point of the outline is at the bow end, where the latches are.' : 'The widest part of the outline is at the trigger end: the ends may be swapped. Retrace and swap them, or check the photo.', { swap: true });
   }
+  // 5b. what is actually holding the harp
+  const holdNote = {
+    lash: 'The slots are the whole mechanism: thread 2-3 mm cord or shock cord up through one, over the frame bar and down the other, then tie it under the case. Nothing printed can wear out.',
+    slide: 'The cover prints flat beside the case. Slide it in from the open end until it clicks over the bump; slide it back off to get the harp out.',
+    swing: 'Two turn-buttons on captive pegs. A firm quarter-turn frees each one after printing, and it clicks into place on a detent.',
+  }[holdKind];
+  if (holdNote) add('hold', true, 'info', holdNote);
+
   // 6. removal path (deck / pendant): tilt about the tips, slide back `slideOut`, lift
   let removal = null;
   if (roofedStyle) {

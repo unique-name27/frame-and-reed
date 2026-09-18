@@ -53,26 +53,32 @@ try { stage = new Stage($('stage')); } catch (e) { console.warn('WebGL unavailab
 
 // ---------------- data ----------------
 const STYLES = [
-  ['deck', 'Open deck', 'Slide latches hold the bow, a roof over the hood holds the tips. The thinnest body; the daily carry.', '',
+  ['deck', 'Open deck', 'Two latches across the bow and a roof over the trigger end. Thinnest of the five, and the one to print first.', '',
     '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M6 26h44v5H6z"/><path d="M8 26V15h40v11"/><path d="M8 15c0-3 3-4 6-4h6v15"/><path d="M12 20h7M37 20h7" stroke-width="3" stroke-linecap="round"/></svg>'],
-  ['sleeve', 'Slide sleeve', 'The harp slides in ring-first under a slotted roof; a turn-button gate at the mouth locks it in.', '',
+  ['sleeve', 'Slide sleeve', 'Goes in bow first, under a slotted roof. A turn-button at the mouth stops it sliding back out.', '',
     '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M6 26h44v5H6z"/><path d="M6 26V14h44v12"/><path d="M6 14c0-3 2-5 5-5h9v22"/><path d="M26 14h24" stroke-dasharray="3 3"/><path d="M22 9v17" opacity=".5"/></svg>'],
-  ['clam', 'Hinged clamshell', 'A flat deck and a lid that carries the hood, on a five-knuckle hinge. A sliding bolt on the lid shoots into a keeper at the bail end. The gift box that is also the case.', '',
+  ['clam', 'Hinged clamshell', 'Flat base, hinged lid, sliding bolt at the far end. Two prints and a bit of filament for the hinge pin.', '',
     '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M6 27h40v5H6z"/><path d="M6 27V19h40v8"/><path d="M46 19l6-14h-30l-4 8" /><circle cx="46" cy="19" r="2.2"/></svg>'],
-  ['pendant', 'Pendant', 'The open deck with windows in the floor: the harp shows through, the frame stays fully supported. Worn on a cord.', '',
+  ['pendant', 'Pendant', 'The deck with windows cut in the floor so the harp shows through. For wearing on a cord.', '',
     '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 30h36v4H12z"/><path d="M14 30V19h32v11"/><path d="M14 19c0-3 3-4 6-4h6v15"/><path d="M28 30v4M40 30v4" opacity=".4"/><path d="M12 22H8c-3 0-4-2-4-4v-5" stroke-linecap="round"/><circle cx="4" cy="11" r="2.2"/></svg>'],
-  ['multi', 'Collector rack', 'Two to five pockets in one deck, buttons shared between neighbours. For the shelf or the gig bag.', '',
+  ['multi', 'Collector rack', 'Two to five pockets in a row, sharing turn-buttons between neighbours. For a shelf or a gig bag.', '',
     '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M4 26h48v5H4z"/><path d="M6 26V15h44v11"/><path d="M6 15c0-3 2-4 5-4h5v15M20 11h6v15M36 11h4v15"/><path d="M11 20h4M23 20h6M41 20h4" stroke-width="3" stroke-linecap="round"/></svg>'],
 ];
 const HOLDS = [
-  ['bladeSide', 'Hidden blades · side', 'Two flat blades slide through the walls and lie across the bow. Nothing on the deck; a small thumb-nub on each side.',
+  ['bladeSide', 'Hidden blades · side', 'Flat blades that slide in through the side walls and lie over the bow. Push them with a thumb. Nothing sticks up off the deck.',
     '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M6 27h44v5H6z"/><path d="M8 27V15h40v12"/><circle cx="28" cy="20" r="5"/><path d="M2 19h18M36 19h18" stroke-width="3" stroke-linecap="round"/></svg>'],
-  ['bladeTop', 'Hidden blades · top', 'The same blades, driven by flush sliders on the deck top. Smooth sides; slightly thicker deck and small lugs.',
+  ['bladeTop', 'Hidden blades · top', 'The same blades, pushed from small tabs on top instead of from the sides. Smooth sides, slightly thicker deck.',
     '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M6 27h44v5H6z"/><path d="M8 27V15h40v12"/><circle cx="28" cy="20" r="5"/><path d="M10 19h12M34 19h12" stroke-width="3" stroke-linecap="round"/><path d="M14 15v-3M42 15v-3" stroke-width="2.5"/></svg>'],
-  ['spine', 'Spine bolt', 'One bolt at the bail end slides inward over the back of the bow. One motion, in line with the cord.',
+  ['spine', 'Spine bolt', 'One bolt at the cord end, pushed in over the back of the bow. Only one thing to move.',
     '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M6 27h44v5H6z"/><path d="M8 27V15h40v12"/><circle cx="30" cy="20" r="5"/><path d="M4 20h20" stroke-width="3" stroke-linecap="round"/><path d="M6 15h10v-4H6z"/></svg>'],
-  ['twin', 'Twin bolts', 'Two bolts in roofed channels on the deck top, one from each side across the bow. The most visible, and the most hold.',
+  ['twin', 'Twin bolts', 'Two bolts in covered channels, one from each side. The most obvious of the sliding latches, and the most grip.',
     '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M6 27h44v5H6z"/><path d="M8 27V15h40v12"/><circle cx="28" cy="20" r="5"/><path d="M4 12h12v4H4zM40 12h12v4H40z"/><path d="M14 18h8M42 18h-8" stroke-width="3" stroke-linecap="round"/></svg>'],
+  ['lash', 'Cord lashing', 'Two slots and no mechanism. You thread your own cord or shock cord over the frame and tie it underneath. Nothing printed can break.',
+    '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M6 27h44v5H6z"/><path d="M8 27V15h40v12"/><circle cx="28" cy="20" r="5"/><rect x="11" y="16" width="3.5" height="9" rx="1.75"/><rect x="41.5" y="16" width="3.5" height="9" rx="1.75"/><path d="M12.7 16c1-5 30.6-5 30.6 0" stroke-dasharray="3 2.5"/></svg>'],
+  ['slide', 'Sliding cover', 'A plate that slides in from the open end and clicks shut over the bow. Prints flat beside the case.',
+    '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M6 27h44v5H6z"/><path d="M8 27V15h40v12"/><circle cx="34" cy="20" r="5" opacity=".45"/><rect x="18" y="12" width="32" height="7" rx="1.5"/><path d="M14 15.5H4M4 15.5l3.5-3.5M4 15.5l3.5 3.5" stroke-linecap="round"/></svg>'],
+  ['swing', 'Turn-buttons', 'Two bars on captive pegs, a quarter turn each. The stoutest of the moving parts: a 4 mm peg instead of a 1.6 mm blade.',
+    '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M6 27h44v5H6z"/><path d="M8 27V15h40v12"/><circle cx="28" cy="20" r="5"/><circle cx="12" cy="19" r="2.4"/><circle cx="44" cy="19" r="2.4"/><path d="M12 19h11M44 19H33" stroke-width="3.5" stroke-linecap="round"/><path d="M15 13.5a5 5 0 0 0-4-2" stroke-width="1.2"/></svg>'],
 ];
 let style = 'deck', preset = 'bowM', shape = 'round', hold = 'bladeSide';
 
@@ -143,16 +149,17 @@ function rebuild() {
   let g, dims, report;
   try { ({ g, dims, report } = build(P)); }
   catch (e) { console.error(e); setStatus('That combination could not be built (' + (e.message || e) + '). The previous case is still shown — try a different setting.', true); return; }
-  current = g; lastDims = dims; lastReport = report; window.__scene = g; window.__report = report; window.__engine = { toSTL, toOBJ, build, THREE };
+  current = g; lastDims = dims; lastReport = report; window.__scene = g; window.__report = report; window.__engine = { toSTL, toOBJ, build, THREE, state };
   stage.setObject(g, !first);
   first = false;
   const mm = v => v.toFixed(0), inch = v => (v / IN).toFixed(2);
   $('dims').innerHTML = `<b>${mm(dims.L)} × ${mm(dims.W)} × ${mm(dims.D)} mm</b><br>${inch(dims.L)} × ${inch(dims.W)} × ${inch(dims.D)} in, outside`;
   const sName = STYLES.find(s => s[0] === style)[1];
   const harpName = state.trace ? 'your traced harp' : PRESETS[preset] && !customised() ? PRESETS[preset].name : `a ${P.len.toFixed(1)} in harp${P.tail > 0 ? ' with a ' + P.tail.toFixed(2) + ' in tail' : ''}`;
-  const holdName = { bladeSide: 'two hidden blades (side thumbs)', bladeTop: 'two hidden blades (top sliders)', spine: 'a spine bolt at the bail end', twin: 'twin bolts across the bow' }[hold];
+  const holdName = { bladeSide: 'two hidden blades (side thumbs)', bladeTop: 'two hidden blades (top sliders)', spine: 'a spine bolt at the cord end', twin: 'twin bolts across the bow', lash: 'a cord of your own through the lash slots', slide: 'a cover that slides over the bow', swing: 'two turn-buttons' }[hold];
   const held = { deck: holdName + ' and the hood roof', sleeve: 'a turn-button gate at the mouth', clam: 'a hinged lid with a sliding bolt', pendant: holdName + ' over a windowed floor', multi: 'shared turn-buttons' }[style];
   $('summary').innerHTML = `<em>${sName}</em> for ${harpName}${style === 'multi' ? ` × ${P.bays}` : ''}, held by ${held}${P.bail ? ', with a bail' : ''}.`;
+  document.querySelectorAll('.only-buttons').forEach(el => el.hidden = state.buttons.length === 0); // cord lashing has nothing to latch
   renderFit(report); stopDemo();
   writeHash(); syncBox();
 }
@@ -287,7 +294,7 @@ const holdName2 = () => HOLDS.find(h => h[0] === hold)[1];
 function settingsCard() {
   const P = params(), sName = STYLES.find(s => s[0] === style)[1];
   return [
-    'FRAME & REED — jaw harp case', '',
+    'JAW HARP CASE GENERATOR', '',
     `Style        ${sName}${(style === 'deck' || style === 'pendant') ? ' · held by ' + holdName2() : ''}`,
     `Harp         ${state.trace ? 'traced from a photo' : (PRESETS[preset] && !customised() ? PRESETS[preset].name : 'custom, ' + shape + ' bow')} · ${P.len} × ${P.wid} in, arm span ${P.span} in, bar ${P.arm} mm, height to trigger ${P.trig} in, frame ${P.thick} mm thick${P.tail > 0 ? `, reed tail ${P.tail} in` : ''}`,
     `Case         ${lastDims.L.toFixed(1)} × ${lastDims.W.toFixed(1)} × ${lastDims.D.toFixed(1)} mm outside`,
@@ -297,7 +304,9 @@ function settingsCard() {
       ? 'case-base.stl / case-lid.stl   z-up, millimetres, each already on the bed. Print both flat, no supports: the base carries the hinge knuckles on a shelf and the bolt keeper on the end tab; the lid is a plate with the hood on top and the bolt printed in place in its channel. Slide the bolt back with its thumb-nub to free it, push a 40 mm length of 1.75 mm filament through the hinge knuckles as the pin and trim it flush.'
       : 'case.stl     all printed parts, z-up, millimetres. Slice flat, no supports, 0.4 mm nozzle, 0.2 mm layers (the print gap is then two layers of air).',
     'case.obj     the same parts named (case.mtl), y-up, millimetres.',
-    `Every moving part prints in place with ${P.pgap} mm of air all round. Slide latches print retracted: push each one home after printing and it clicks into a detent at both ends of its travel. Print the first one in PLA (PETG welds across small gaps).`,
+    hold === 'lash' ? 'No moving parts: thread your own cord or shock cord up through one slot, over the frame bar, down the other, and tie it under the case.'
+      : hold === 'slide' ? `The cover is the separate flat plate beside the case on the bed. Slide it in from the open end until it clicks over the bump. Everything has ${P.pgap} mm of air around it.`
+      : `Moving parts print in place with ${P.pgap} mm of air all round. Slide latches print retracted: push each one home after printing and it clicks into a detent at both ends of its travel. Print the first one in PLA (PETG welds across small gaps).`,
     'Felt lining and the harp are preview only and are not in these files.', '',
     'Design code (paste it under "Load a design code" to reopen this exact case): ' + designCode(),
   ].join('\n');
@@ -307,7 +316,7 @@ function buildFiles() {
   const saved = state.locks.slice(); state.locks.fill(true); // print pose: every button locked (detent engaged), lid closed, no harp
   const g = build({ ...params(), harp: false, open: 0, printPose: true }).g; // slide latches retracted, buttons locked, lid closed
   state.locks.splice(0, state.locks.length, ...saved);
-  const tag = `frame-and-reed-${style}-${state.trace ? 'traced' : (preset || shape)}`;
+  const tag = `jaw-harp-case-${style}-${state.trace ? 'traced' : (preset || shape)}`;
   const stls = style === 'clam'
     ? [[`${tag}-base.stl`, toSTL(g, 'base')], [`${tag}-lid.stl`, toSTL(g, 'lid')]]
     : [[`${tag}.stl`, toSTL(g)]];

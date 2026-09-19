@@ -614,12 +614,17 @@ function latchShape(bW, bL, notches, rn, flange) {
 function latchDims(kind, clr, frameT, gap, wall) {
   const blade = kind === 'bladeSide' || kind === 'bladeTop', f = blade ? 2 : 0, wallC = 1.6;
   const over = clr + frameT + 2.5; // the latch body reaches 2.5 mm past the far side of the bar
-  const openPos = blade ? -3.6 : gap, lockPos = blade ? -(over + 2) : -over, travel = openPos - lockPos;
-  const bumpZ = blade ? 1.5 : 2.5, uA = bumpZ - openPos - f, uB = uA + travel, rn = 0.6 + gap;
+  // Retracted, a latch has to sit clear of the harp itself or the harp cannot be lifted out past it. Positions are
+  // measured from the pocket wall, and the harp's edge is one clearance inside that, so parking the tip 0.8 mm
+  // outside the harp means openPos = 0.8 - clr. A blade's flange is wider than its tunnel, so the tunnel is opened
+  // out to flange width for the first `mouthEnd` of its length and the detent bump sits beyond that.
+  const openPos = blade ? 0.8 - clr : gap, lockPos = blade ? -(over + 2) : -over, travel = openPos - lockPos;
+  const mouthEnd = blade ? openPos + f + 0.6 : 0;
+  const bumpZ = blade ? mouthEnd + 1.5 : 2.5, uA = bumpZ - openPos - f, uB = uA + travel, rn = 0.6 + gap;
   const bL = Math.max(blade ? 17 : 12, uB + rn + 2); // both detent notches inside the latch with 2 mm to spare
   const tunnelEnd = kind === 'bladeSide' ? wall + 3 : blade ? openPos + f + bL + gap + 0.8 : openPos + bL + gap + 0.8; // +0.8: contour rounding at the end
   const chanEnd = openPos + bL + gap + wallC; // back wall of a bolt channel
-  return { blade, f, wallC, over, openPos, lockPos, travel, bumpZ, uA, uB, rn, bL, tunnelEnd, chanEnd };
+  return { blade, f, wallC, over, openPos, lockPos, travel, bumpZ, mouthEnd, uA, uB, rn, bL, tunnelEnd, chanEnd };
 }
 // Cord lashing: no mechanism at all. The deck is plain, with a slot each side of the bow (cut in every layer by
 // deckLayer), and the owner threads their own cord over the frame. Nothing printed can wear out, snap or seize.
@@ -667,14 +672,17 @@ function buildHold(g, kind, c) {
   const { P, deckLayer, addLayer, frameTop, Dlow, xL, xR, zRing, clr, frameT, wall, gap, R, tabX, zEnd } = c;
   const { locks, buttons } = state;
   const yBot = frameTop + gap;
-  const { blade, f, wallC, openPos, lockPos, bumpZ, uA, uB, rn, bL, tunnelEnd } = latchDims(kind, clr, frameT, gap, wall);
+  const { blade, f, wallC, openPos, lockPos, bumpZ, mouthEnd, uA, uB, rn, bL, tunnelEnd } = latchDims(kind, clr, frameT, gap, wall);
   const bW = blade ? 8 : 5, bT = blade ? 1.6 : 3, nHalf = bW / 2 + gap + 0.15; // notch half-width (+0.15 for contour rounding)
   const flange = blade;
   // where each latch sits: [origin x, origin z, rotation.y]  (rotation maps local −z, the locking direction, onto the world)
   const places = kind === 'spine' ? [[tabX, zEnd, Math.PI]] : [[xL, zRing, -Math.PI / 2], [xR, zRing, Math.PI / 2]];
   const toWorld = (px, pz, rot, x, z) => ({ x: px + x * Math.cos(rot) + z * Math.sin(rot), z: pz - x * Math.sin(rot) + z * Math.cos(rot) });
   const rectW = (pl, x0, z0, x1, z1) => ({ poly: [toWorld(pl[0], pl[1], pl[2], x0, z0), toWorld(pl[0], pl[1], pl[2], x1, z0), toWorld(pl[0], pl[1], pl[2], x1, z1), toWorld(pl[0], pl[1], pl[2], x0, z1)] });
-  const notchPrims = places.map(pl => rectW(pl, -nHalf, -3, nHalf, tunnelEnd));
+  const fHalf = bW / 2 + 1.5 + gap + 0.15; // the flange, plus print gap and contour rounding
+  const notchPrims = places.flatMap(pl => blade
+    ? [rectW(pl, -nHalf, -3, nHalf, tunnelEnd), rectW(pl, -fHalf, -3, fHalf, mouthEnd)] // wider mouth for the flange
+    : [rectW(pl, -nHalf, -3, nHalf, tunnelEnd)]);
   const notchMask = maskOf(R, notchPrims, 0);
   // deck layers
   if (blade) {
@@ -807,6 +815,15 @@ function fitReport(c) {
     const frac = (wz - bb.minZ) / (bb.maxZ - bb.minZ); // 0 = bow end, 1 = trigger end
     add('orientation', frac < 0.55, 'warn', frac < 0.55 ? 'The widest point of the outline is at the bow end, where the latches are.' : 'The widest part of the outline is at the trigger end: the ends may be swapped. Retrace and swap them, or check the photo.', { swap: true });
   }
+  // 5a. a retracted latch has to be clear of the harp, or nothing can be lifted out
+  if (holdKind && /blade|twin|spine/.test(holdKind)) {
+    const d = latchDims(holdKind, clr, frameT, P.gap || 0.4, P.wall);
+    const room = clr + d.openPos; // how far the parked latch sits outside the harp's edge
+    add('retract', room >= 0.3, 'bad', room >= 0.3
+      ? `Drawn back, the ${d.blade ? 'blades' : 'bolts'} park ${room.toFixed(1)} mm clear of the harp.`
+      : `Drawn back, the ${d.blade ? 'blades' : 'bolts'} still overlap the harp by ${(-room).toFixed(1)} mm, so it cannot be lifted out.`);
+  }
+
   // 5b. what is actually holding the harp
   const holdNote = {
     lash: 'The slots are the whole mechanism, and they sit 2 mm off the pocket wall so the cord bears on the frame itself. Thread 2-3 mm cord or shock cord up through one, along the groove across the deck, down the other, and tie it under the case. The groove holds the cord below the top of the frame, so pulling it tight clamps the harp down.',

@@ -202,7 +202,7 @@ function startDemo() {
   const pivot = rm.pivot ? new THREE.Vector3(0, rm.pivot.y * K, rm.pivot.z * K) : null;
   // pick the rotation sign that lifts the bow (the −z side)
   let sign = 1; if (pivot) { const t = new THREE.Vector3(0, pivot.y, pivot.z - 20).sub(pivot).applyAxisAngle(new THREE.Vector3(1, 0, 0), rm.theta); if (t.y < 0) sign = -1; }
-  const T0 = performance.now(), DUR = 3600, HOLD = 900;
+  const T0 = performance.now(), LEAD = 800, DUR = 3600, HOLD = 900; // LEAD: let the hardware get out of the way first
   const pose = t => { // t in [0,3]
     h.position.copy(base); h.rotation.set(0, 0, 0); h.matrixAutoUpdate = true;
     if (rm.liftOnly) { if (lid) lid.rotation.z = lidRot - Math.min(1, t / 1.5) * Math.PI * 0.55; h.position.y = base.y + Math.max(0, t - 1.5) / 1.5 * 30 * K; return; }
@@ -213,8 +213,9 @@ function startDemo() {
     h.matrixAutoUpdate = false; h.matrix.copy(new THREE.Matrix4().makeTranslation(base.x, base.y, base.z).multiply(m)); h.matrixWorldNeedsUpdate = true;
   };
   const step = () => {
-    const e = performance.now() - T0; let t;
-    if (e < DUR) t = (e / DUR) * 3; else if (e < DUR + HOLD) t = 3; else if (e < 2 * DUR + HOLD) t = 3 - ((e - DUR - HOLD) / DUR) * 3; else { pose(0); h.matrixAutoUpdate = true; h.updateMatrix(); if (lid) lid.rotation.z = lidRot; state.locks.splice(0, state.locks.length, ...saved); syncBox(); demo = null; return; }
+    const e = performance.now() - T0 - LEAD; let t;
+    if (e < 0) t = 0;
+    else if (e < DUR) t = (e / DUR) * 3; else if (e < DUR + HOLD) t = 3; else if (e < 2 * DUR + HOLD) t = 3 - ((e - DUR - HOLD) / DUR) * 3; else { pose(0); h.matrixAutoUpdate = true; h.updateMatrix(); if (lid) lid.rotation.z = lidRot; state.locks.splice(0, state.locks.length, ...saved); syncBox(); demo = null; return; }
     pose(t); demo.raf = requestAnimationFrame(step);
   };
   demo = { raf: requestAnimationFrame(step) };

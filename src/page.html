@@ -123,6 +123,16 @@ details[open] summary::before{transform:rotate(45deg)}
 .style .d{font-size:12px;color:var(--muted);line-height:1.35}
 .style .p{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap}
 
+/* segmented choices */
+.seg{display:flex;border:1px solid var(--line-strong);border-radius:6px;overflow:hidden;background:var(--surface)}
+.seg button{flex:1;padding:8px 10px;border:0;border-right:1px solid var(--line);background:transparent;font-size:13px;line-height:1.25;cursor:pointer;color:var(--ink)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed=true]{background:var(--accent);color:var(--accent-ink)}
+.seg button .sub{display:block;font-size:11px;opacity:.8;font-family:var(--sans);color:inherit}
+.decos{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.decos .style{grid-template-columns:44px 1fr;padding:8px 10px 8px 8px}
+.decos .style svg{width:44px;height:30px}
+.decos .style:first-child{grid-column:1 / -1}
 /* swatches */
 .sw{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .sw button{width:26px;height:26px;border-radius:50%;border:2px solid transparent;padding:0;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(0,0,0,.18),0 0 0 1px var(--line)}
@@ -246,8 +256,20 @@ footer{padding:16px clamp(16px,3vw,32px) 28px;font-family:var(--mono);font-size:
       </div>
     </section>
 
+    <section class="step" id="s3">
+      <h2><span class="num">03</span>Decoration</h2>
+      <p class="lede">A pattern for the top of the case. Each one is drawn fresh to fit your case's outline, so a different size gets a different drawing.</p>
+      <div class="decos" id="decos"></div>
+      <div class="only-deco" hidden>
+        <div class="field"><div class="lbl">Cut</div><div class="seg" id="cuts" role="group" aria-label="How the pattern is cut"></div></div>
+        <div class="photo-row"><button id="reroll" class="btn" type="button">Draw it again</button><span class="note" style="margin:0" id="deco-hint"></span></div>
+      </div>
+      <div class="field"><div class="lbl">Printed in</div><div class="seg" id="procs" role="group" aria-label="Printing process"></div></div>
+      <div class="field"><div class="lbl">Preview colour <span class="sub">the file itself has no colour</span></div><div class="sw" id="finish"></div></div>
+    </section>
+
     <section class="step" id="s4">
-      <h2><span class="num">03</span>Your file</h2>
+      <h2><span class="num">04</span>Your file</h2>
       <p class="summary" id="summary"></p>
       <div class="actions">
         <button id="dl" class="btn primary" type="button">Download the STL</button>

@@ -18,7 +18,9 @@ class Stage {
     this.scene = new THREE.Scene();
     this.scene.environment = new THREE.PMREMGenerator(r).fromScene(new RoomEnvironment(), 0.04).texture;
     this.camera = new THREE.PerspectiveCamera(32, 1, 0.001, 50);
-    const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(0.6, 1.2, 0.8); this.scene.add(key);
+    const key = new THREE.DirectionalLight(0xffffff, 1.5); key.position.set(0.6, 1.2, 0.8); this.scene.add(key);
+    // a low, raking light from the other side: it catches the walls of raised and engraved work so the ornament reads
+    const rake = new THREE.DirectionalLight(0xfff4e6, 0.9); rake.position.set(-1, 0.32, -0.55); this.scene.add(rake);
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8698, 0.5));
     const c = this.controls = new OrbitControls(this.camera, r.domElement);
     c.enableDamping = true; c.dampingFactor = 0.08; c.autoRotate = !reduced; c.autoRotateSpeed = 0.9; c.maxPolarAngle = Math.PI * 0.62;
@@ -81,6 +83,22 @@ const HOLDS = [
     '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M6 27h44v5H6z"/><path d="M8 27V15h40v12"/><circle cx="28" cy="20" r="5"/><circle cx="12" cy="19" r="2.4"/><circle cx="44" cy="19" r="2.4"/><path d="M12 19h11M44 19H33" stroke-width="3.5" stroke-linecap="round"/><path d="M15 13.5a5 5 0 0 0-4-2" stroke-width="1.2"/></svg>'],
 ];
 let style = 'deck', preset = 'bowM', shape = 'round', hold = 'bladeSide';
+let deco = 'none', cut = 'relief', proc = 'fdm', dseed = 1, finish = 'charcoal';
+const DECOS = [
+  ['none', 'Plain', 'Just the shell. Prints fastest.',
+    '<svg viewBox="0 0 44 30" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="6" width="36" height="18" rx="5"/></svg>'],
+  ['damascus', 'Damascus steel', 'Folded layers and raindrops, like forged steel.',
+    '<svg viewBox="0 0 44 30" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 8c6-3 9 3 15 0s9-3 15 0 6 1 6 1M4 14c6-3 9 3 15 0s9-3 15 0 6 1 6 1M4 20c5-2 7 1 10 0M30 20c3 1 6 0 10-1M4 26c6-3 9 3 15 0s9-3 15 0"/><circle cx="22" cy="20" r="3.2"/><circle cx="22" cy="20" r="0.8"/></svg>'],
+  ['scroll', 'Scrollwork', 'A vine of curling tendrils and leaves.',
+    '<svg viewBox="0 0 44 30" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 20c7 0 9-10 17-10s10 10 21 10"/><path d="M13 13c-1-5 5-7 7-4s-1 5-3 4"/><path d="M29 17c1 5 6 6 8 3s-1-5-3-4"/><path d="M21 10l3-5" /><path d="M24 5c2 0 3 1 3 3-2 0-3-1-3-3z" fill="currentColor"/></svg>'],
+  ['flowers', 'Flowering vine', 'Blossoms on curving stalks.',
+    '<svg viewBox="0 0 44 30" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M3 23c8 0 11-6 19-6s10 5 19 5"/><path d="M14 20l-1-8M30 18l2-7"/><g fill="currentColor" stroke="none"><circle cx="13" cy="8" r="2.4"/><circle cx="16.4" cy="10.4" r="2.4"/><circle cx="15" cy="14" r="2.4"/><circle cx="11" cy="14" r="2.4"/><circle cx="9.6" cy="10.4" r="2.4"/><circle cx="32" cy="7" r="2"/><circle cx="35" cy="9" r="2"/><circle cx="34" cy="12" r="2"/><circle cx="30.4" cy="12" r="2"/><circle cx="29.2" cy="9" r="2"/></g></svg>'],
+  ['seigaiha', 'Japanese waves', 'Seigaiha wave arcs with drifting sakura.',
+    '<svg viewBox="0 0 44 30" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 16a8 8 0 0 1 16 0M5 16a5 5 0 0 1 10 0M8 16a2 2 0 0 1 4 0M18 16a8 8 0 0 1 16 0M21 16a5 5 0 0 1 10 0M24 16a2 2 0 0 1 4 0M34 16a8 8 0 0 1 16 0M37 16a5 5 0 0 1 10 0M10 26a8 8 0 0 1 16 0M13 26a5 5 0 0 1 10 0M16 26a2 2 0 0 1 4 0M26 26a8 8 0 0 1 16 0M29 26a5 5 0 0 1 10 0M-6 26a8 8 0 0 1 16 0"/></svg>'],
+];
+const CUTS = [['relief', 'Raised'], ['engrave', 'Engraved'], ['pierce', 'Pierced']];
+const PROCS = [['fdm', 'Filament', 'FDM, 0.4 mm nozzle'], ['resin', 'Resin', 'finer detail']];
+const FINISHES = [['charcoal', 'Charcoal', 0x1c1917], ['ivory', 'Ivory', 0xe6dccb], ['jade', 'Jade', 0x3e7a66], ['oxblood', 'Oxblood', 0x6e2027], ['indigo', 'Indigo', 0x2f3d66], ['bronze', 'Bronze', 0x9a7442]];
 
 // a top-view silhouette of a preset, drawn from the same primitives the engine cuts the pocket from
 function silhouette(p) {
@@ -96,7 +114,7 @@ const presetsEl = $('presets');
 Object.entries(PRESETS).forEach(([k, p]) => {
   const b = document.createElement('button'); b.type = 'button'; b.className = 'preset'; b.dataset.k = k;
   b.innerHTML = `<span class="n">${p.name}</span>${silhouette(p)}<span class="d">${p.kind}</span><span class="m">${p.len.toFixed(1)} × ${p.wid.toFixed(2)} in</span>`;
-  b.addEventListener('click', () => { applyPreset(k); state.trace = null; setTraced(false); rebuild(); });
+  b.addEventListener('click', () => { applyPreset(k); state.trace = null; setTraced(false); rebuildUI(); });
   presetsEl.appendChild(b);
 });
 const DIMS = ['len', 'wid', 'span', 'arm', 'trig', 'tail', 'thick'];
@@ -107,7 +125,7 @@ const stylesEl = $('styles');
 STYLES.forEach(([k, n, d, p, svg]) => {
   const b = document.createElement('button'); b.type = 'button'; b.className = 'style'; b.dataset.k = k;
   b.innerHTML = `${svg}<span><span class="n">${n}</span><br><span class="d">${d}</span></span>`;
-  b.addEventListener('click', () => { style = k; rebuild(); });
+  b.addEventListener('click', () => { style = k; rebuildUI(); });
   stylesEl.appendChild(b);
 });
 function syncStyles() { [...stylesEl.children].forEach(b => b.setAttribute('aria-pressed', String(b.dataset.k === style))); [...holdsEl.children].forEach(b => b.setAttribute('aria-pressed', String(b.dataset.k === hold))); }
@@ -115,9 +133,36 @@ const holdsEl = $('holds');
 HOLDS.forEach(([k, n, d, svg]) => {
   const b = document.createElement('button'); b.type = 'button'; b.className = 'style'; b.dataset.k = k;
   b.innerHTML = `${svg}<span><span class="n">${n}</span><br><span class="d">${d}</span></span>`;
-  b.addEventListener('click', () => { hold = k; rebuild(); });
+  b.addEventListener('click', () => { hold = k; rebuildUI(); });
   holdsEl.appendChild(b);
 });
+const decosEl = $('decos');
+DECOS.forEach(([k, n, d, svg]) => {
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'style'; b.dataset.k = k;
+  b.innerHTML = `${svg}<span><span class="n">${n}</span><br><span class="d">${d}</span></span>`;
+  b.addEventListener('click', () => { deco = k; rebuildUI(); });
+  decosEl.appendChild(b);
+});
+const segs = (el, list, get, set) => { list.forEach(([k, n, sub]) => { const b = document.createElement('button'); b.type = 'button'; b.dataset.k = k; b.innerHTML = n + (sub ? `<span class="sub">${sub}</span>` : ''); b.addEventListener('click', () => { set(k); rebuildUI(); }); el.appendChild(b); }); };
+segs($('cuts'), CUTS, () => cut, k => { cut = k; });
+segs($('procs'), PROCS, () => proc, k => {
+  // resin fills narrow gaps, so the moving parts get the widest gap; back on filament, the usual one
+  if (k === 'resin' && +$('pgap').value < 0.55) $('pgap').value = 0.6;
+  if (k === 'fdm' && proc === 'resin' && +$('pgap').value >= 0.6) $('pgap').value = 0.4;
+  proc = k;
+});
+$('reroll').addEventListener('click', () => { dseed = (dseed % 9973) + 1; rebuildUI(); });
+const finishEl = $('finish');
+FINISHES.forEach(([k, n, hex]) => { const b = document.createElement('button'); b.type = 'button'; b.dataset.k = k; b.title = n; b.setAttribute('aria-label', n); b.style.background = '#' + hex.toString(16).padStart(6, '0'); b.addEventListener('click', () => { finish = k; applyFinish(); writeHash(); }); finishEl.appendChild(b); });
+const finishName = document.createElement('span'); finishName.className = 'name'; finishEl.appendChild(finishName);
+function applyFinish() { const f = FINISHES.find(x => x[0] === finish) || FINISHES[0]; mats.body.color.setHex(f[2]); [...finishEl.querySelectorAll('button')].forEach(b => b.setAttribute('aria-pressed', String(b.dataset.k === f[0]))); finishName.textContent = f[1]; }
+function syncDeco() {
+  [...decosEl.children].forEach(b => b.setAttribute('aria-pressed', String(b.dataset.k === deco)));
+  [...$('cuts').children].forEach(b => b.setAttribute('aria-pressed', String(b.dataset.k === cut)));
+  [...$('procs').children].forEach(b => b.setAttribute('aria-pressed', String(b.dataset.k === proc)));
+  document.querySelectorAll('.only-deco').forEach(el => el.hidden = deco === 'none');
+  $('deco-hint').textContent = deco === 'none' ? '' : 'Same pattern, a new drawing.';
+}
 
 const ids = ['len', 'wid', 'span', 'trig', 'thick', 'arm', 'tail', 'hood', 'wall', 'clr', 'pgap', 'bays', 'open'];
 const fmt = { len: v => v.toFixed(2) + ' in', wid: v => v.toFixed(2) + ' in', span: v => v.toFixed(2) + ' in', trig: v => v.toFixed(2) + ' in', tail: v => v > 0 ? v.toFixed(2) + ' in' : 'none', arm: v => v + ' mm', thick: v => v + ' mm', hood: v => v + ' %', wall: v => v + ' mm', clr: v => v + ' mm', pgap: v => v.toFixed(2) + ' mm', bays: v => v + '', open: v => v + '°' };
@@ -128,16 +173,23 @@ function setTraced(on) {
 }
 
 // ---------------- build ----------------
+// With an ornament on, a rebuild takes a moment: say so, and give the browser a frame to show it first.
+let busyT = 0;
+function rebuildUI() {
+  if (deco === 'none') { rebuild(); return; }
+  const boot = $('boot'); boot.className = ''; boot.textContent = 'Drawing the pattern…'; boot.hidden = false;
+  clearTimeout(busyT); busyT = setTimeout(() => { try { rebuild(); } finally { boot.hidden = true; } }, 40);
+}
 const setStatus = (msg, err) => { const s = $('status'); s.textContent = msg; s.classList.toggle('err', !!err); };
 let first = true, current = null, lastDims = null, lastReport = null, lastOpen = 0, lastStyle = '';
 function params() {
-  const P = { style, shape, hold, harp: $('harp').checked, bail: $('bail').checked, mono: '', accentHex: '#d8b064' };
+  const P = { style, shape, hold, deco, cut, proc, dseed, harp: $('harp').checked, bail: $('bail').checked, mono: '', accentHex: '#d8b064' };
   ids.forEach(id => { P[id] = +$(id).value; });
   P.gap = P.pgap;
   return P;
 }
-function rebuild() {
-  const P = params();
+function rebuild(draft) {
+  const P = params(); if (draft) P.deco = 'none'; // while a slider is moving, skip the ornament; it is drawn once the slider stops
   ids.forEach(id => { const o = $('o-' + id); if (o) o.textContent = fmt[id](P[id]); });
   document.querySelectorAll('.only-multi').forEach(el => el.hidden = style !== 'multi');
   document.querySelectorAll('.only-clam').forEach(el => el.hidden = style !== 'clam');
@@ -145,7 +197,7 @@ function rebuild() {
   if (style !== lastStyle) { state.locks.fill(true); lastStyle = style; }
   if (style === 'clam') { if (P.open > 5) state.locks[0] = false; else if (lastOpen > 5) state.locks[0] = true; }
   lastOpen = style === 'clam' ? P.open : 0;
-  syncPresets(); syncStyles();
+  syncPresets(); syncStyles(); syncDeco();
   let g, dims, report;
   try { ({ g, dims, report } = build(P)); }
   catch (e) { console.error(e); setStatus('That combination could not be built (' + (e.message || e) + '). The previous case is still shown — try a different setting.', true); return; }
@@ -158,7 +210,8 @@ function rebuild() {
   const harpName = state.trace ? 'your traced harp' : PRESETS[preset] && !customised() ? PRESETS[preset].name : `a ${P.len.toFixed(1)} in harp${P.tail > 0 ? ' with a ' + P.tail.toFixed(2) + ' in tail' : ''}`;
   const holdName = { bladeSide: 'two hidden blades (side thumbs)', bladeTop: 'two hidden blades (top sliders)', spine: 'a spine bolt at the cord end', twin: 'twin bolts across the bow', lash: 'a cord of your own through the lash slots', slide: 'a cover that slides over the bow', swing: 'two turn-buttons' }[hold];
   const held = { deck: holdName + ' and the hood roof', sleeve: 'a turn-button gate at the mouth', clam: 'a hinged lid with a sliding bolt', pendant: holdName + ' over a windowed floor', multi: 'shared turn-buttons' }[style];
-  $('summary').innerHTML = `<em>${sName}</em> for ${harpName}${style === 'multi' ? ` × ${P.bays}` : ''}, held by ${held}${P.bail ? ', with a bail' : ''}.`;
+  const dName = deco === 'none' ? '' : `, ${{ relief: 'raised', engrave: 'engraved', pierce: 'pierced' }[cut]} ${{ damascus: 'Damascus', scroll: 'scrollwork', flowers: 'flowering vine', seigaiha: 'seigaiha waves' }[deco]}`;
+  $('summary').innerHTML = `<em>${sName}</em> for ${harpName}${style === 'multi' ? ` × ${P.bays}` : ''}, held by ${held}${P.bail ? ', with a bail' : ''}${dName}.`;
   document.querySelectorAll('.only-buttons').forEach(el => el.hidden = state.buttons.length === 0); // cord lashing has nothing to latch
   renderFit(report); renderOrderNote(P); stopDemo();
   writeHash(); syncBox();
@@ -174,9 +227,11 @@ function renderFit(report) {
     li.innerHTML = `<span class="ic">${icons[c.level]}</span><span>${c.text}</span>`;
     if (c.fix && !c.ok) {
       const b = document.createElement('button'); b.type = 'button';
-      b.textContent = c.fix.hood !== undefined ? `Set hood to ${c.fix.hood} %` : c.fix.swap ? 'Swap ends' : 'Fix';
+      b.textContent = c.fix.hood !== undefined ? `Set hood to ${c.fix.hood} %` : c.fix.swap ? 'Swap ends' : c.fix.proc ? 'Switch to resin' : c.fix.pgap ? `Gap to ${c.fix.pgap} mm` : 'Fix';
       b.addEventListener('click', () => {
         if (c.fix.hood !== undefined) { $('hood').value = c.fix.hood; rebuild(); }
+        else if (c.fix.proc) { proc = c.fix.proc; if (proc === 'resin' && +$('pgap').value < 0.55) $('pgap').value = 0.6; rebuild(); }
+        else if (c.fix.pgap) { $('pgap').value = c.fix.pgap; rebuild(); }
         else if (c.fix.swap && state.trace) { state.trace = { outline: state.trace.outline.map(p => ({ x: p.x, z: -p.z })), trigger: { x: 0, z: -state.trace.trigger.z } }; rebuild(); }
       });
       li.appendChild(b);
@@ -224,7 +279,11 @@ function startDemo() {
 $('demo').addEventListener('click', () => { if (demo) { stopDemo(); rebuild(); } else startDemo(); });
 function customised() { const p = PRESETS[preset]; return !p || DIMS.some(id => Math.abs(+$(id).value - (p[id] ?? (id === 'thick' ? 4 : 0))) > 1e-6); }
 let queued = false;
-const rebuildSoon = () => { if (queued) return; queued = true; setTimeout(() => { queued = false; rebuild(); }, 0); };
+let fullTimer = 0;
+const rebuildSoon = () => { if (queued) return; queued = true; setTimeout(() => {
+  queued = false; const heavy = deco !== 'none'; rebuild(heavy);
+  if (heavy) { clearTimeout(fullTimer); fullTimer = setTimeout(rebuildUI, 350); }
+}, 0); };
 ids.concat('harp', 'bail').forEach(id => $(id).addEventListener('input', rebuildSoon));
 DIMS.forEach(id => $(id).addEventListener('input', () => { if (customised()) preset = ''; }));
 // See inside: most of the hardware lives inside the case (that is the point of hidden blades), so fade the shell
@@ -245,6 +304,9 @@ function designCode() {
   if (style === 'multi') q.set('bays', $('bays').value);
   if (style === 'clam') q.set('open', $('open').value);
   if (!P.bail) q.set('bail', '0');
+  if (deco !== 'none') { q.set('deco', deco); q.set('cut', cut); q.set('ds', String(dseed)); }
+  if (proc !== 'fdm') q.set('proc', proc);
+  if (finish !== 'charcoal') q.set('fin', finish);
   if (state.trace) q.set('tr', state.trace.trigger.z.toFixed(1) + ';' + state.trace.outline.map(p => p.x.toFixed(1) + ',' + p.z.toFixed(1)).join(';'));
   return q.toString();
 }
@@ -262,6 +324,11 @@ function readState(str) {
   if (Q.get('hold') && HOLDS.some(h => h[0] === Q.get('hold'))) hold = Q.get('hold');
   if (customised()) preset = '';
   $('bail').checked = Q.get('bail') !== '0';
+  deco = DECOS.some(d => d[0] === Q.get('deco')) ? Q.get('deco') : 'none';
+  cut = CUTS.some(d => d[0] === Q.get('cut')) ? Q.get('cut') : 'relief';
+  proc = PROCS.some(d => d[0] === Q.get('proc')) ? Q.get('proc') : 'fdm';
+  dseed = Math.max(1, Math.min(9973, parseInt(Q.get('ds') || '1', 10) || 1));
+  finish = FINISHES.some(d => d[0] === Q.get('fin')) ? Q.get('fin') : 'charcoal'; applyFinish();
   const tr = Q.get('tr'); let traced = false;
   if (tr) { try { const [tz, ...pts] = tr.split(';'); const outline = pts.map(s => { const [x, z] = s.split(',').map(Number); return { x, z }; }); if (outline.length >= 8 && outline.every(p => isFinite(p.x) && isFinite(p.z))) { state.trace = { outline, trigger: { x: 0, z: +tz } }; traced = true; } } catch (e) { /* ignore a malformed code */ } }
   if (!traced) state.trace = null;
@@ -308,7 +375,9 @@ function settingsCard() {
     `Harp         ${state.trace ? 'traced from a photo' : (PRESETS[preset] && !customised() ? PRESETS[preset].name : 'custom, ' + shape + ' bow')} · ${P.len} × ${P.wid} in, arm span ${P.span} in, bar ${P.arm} mm, height to trigger ${P.trig} in, frame ${P.thick} mm thick${P.tail > 0 ? `, reed tail ${P.tail} in` : ''}`,
     `Case         ${lastDims.L.toFixed(1)} × ${lastDims.W.toFixed(1)} × ${lastDims.D.toFixed(1)} mm outside`,
     `Hood         ${P.hood} %   Wall ${P.wall} mm   Clearance ${P.clr} mm   Print gap ${P.pgap} mm`,
-    `Bail         ${P.bail ? 'yes' : 'no'}${style === 'multi' ? `   Harps ${P.bays}` : ''}`, '',
+    `Bail         ${P.bail ? 'yes' : 'no'}${style === 'multi' ? `   Harps ${P.bays}` : ''}`,
+    `Decoration   ${deco === 'none' ? 'none' : DECOS.find(d => d[0] === deco)[1] + ', ' + CUTS.find(c => c[0] === cut)[1].toLowerCase() + ' (drawing ' + dseed + ')'}`,
+    `Printed in   ${proc === 'resin' ? 'resin (SLA / MSLA): a tough or ABS-like resin, not standard, which is brittle' : 'filament (FDM)'}`, '',
     style === 'clam'
       ? 'case-base.stl / case-lid.stl   z-up, millimetres, each already on the bed. Print both flat, no supports: the base carries the hinge knuckles on a shelf and the bolt keeper on the end tab; the lid is a plate with the hood on top and the bolt printed in place in its channel. Slide the bolt back with its thumb-nub to free it, push a 40 mm length of 1.75 mm filament through the hinge knuckles as the pin and trim it flush.'
       : 'case.stl     all printed parts, z-up, millimetres. Slice flat, no supports, 0.4 mm nozzle, 0.2 mm layers (the print gap is then two layers of air).',
@@ -369,6 +438,10 @@ $('dl').addEventListener('click', async () => {
 function renderOrderNote(P) {
   const note = $('ordernote'); if (!note) return;
   const moving = !((style === 'deck' || style === 'pendant') && hold === 'lash');
+  if (proc === 'resin') {
+    note.innerHTML = `<b>What to choose there:</b> resin (SLA, DLP or MSLA), and a tough or ABS-like resin if they offer one — standard resin is brittle and a case gets dropped. Ask them not to hollow it.${moving ? ` The moving parts have ${P.pgap.toFixed(2)} mm of air around them; free each latch after washing, before the final cure.` : ''}`;
+    return;
+  }
   note.innerHTML = moving
     ? `<b>What to choose there:</b> FDM (some sites call it FFF) in PLA or PETG, 0.2 mm layers, no supports. The latches and the lid print already assembled, with ${P.pgap.toFixed(2)} mm of air around them — resin welds that air shut and nylon powder packs it solid. For SLS or MJF, widen the gap to 0.6 mm first${P.pgap < 0.55 ? ' <button id="gap6" class="btn ghost" type="button">set it to 0.6</button>' : ' (set)'} and expect to work the latches loose by hand.`
     : `<b>What to choose there:</b> whatever is cheapest — this one has no moving parts, only slots for your own cord, so any process prints it. FDM in PLA or PETG at 0.2 mm layers is the usual answer; nylon (SLS or MJF) costs more and is close to unbreakable.`;

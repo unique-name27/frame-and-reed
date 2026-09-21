@@ -2,6 +2,7 @@
 // Units: mm inside build(); the returned group is scaled ×0.001 to metres. x across, z along (trigger toward +z), y up.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { DECO, makeDRaster, clearD, mmSpace, pxSpace, readD, edt, erodeM, dilateM, andM, countM, patternInk } from './decor.js';
 
 export const IN = 25.4;
 
@@ -245,6 +246,251 @@ function components(m, w, h) {
   }
   return out;
 }
+// ---------------- decoration: a pattern cut into the top of the case ----------------
+// Works on a fine raster (decor.js, 0.1 mm/px): the surface's region is painted there, the pattern drawn inside it, and
+// the result traced back into shapes and extruded — as raised relief, as an engraving, or as pierced filigree.
+// smoothed, then thinned: no two points closer than 0.4 px (0.04 mm) and no hairpin spikes. Walls between points
+// that close are slivers the STL writer has to drop as degenerate, which would leave the shell open.
+function tidyPx(pts) {
+  let out = [];
+  for (const p of pts) { const q = out[out.length - 1]; if (!q || Math.hypot(p[0] - q[0], p[1] - q[1]) >= 0.4) out.push(p); }
+  while (out.length > 3 && Math.hypot(out[0][0] - out[out.length - 1][0], out[0][1] - out[out.length - 1][1]) < 0.4) out.pop();
+  // walk the outline measuring each point against the last one kept: drop hairpins, and points so nearly in line that
+  // the cap triangle through them would be a sliver (twice its area under 0.5 px²)
+  for (let pass = 0; pass < 2 && out.length > 8; pass++) {
+    const keep = [out[0]];
+    for (let i = 1; i < out.length; i++) {
+      const a = keep[keep.length - 1], b = out[i], c = out[(i + 1) % out.length];
+      const ux = b[0] - a[0], uy = b[1] - a[1], vx = c[0] - b[0], vy = c[1] - b[1];
+      const dot = (ux * vx + uy * vy) / ((Math.hypot(ux, uy) * Math.hypot(vx, vy)) || 1), area2 = Math.abs(ux * (c[1] - a[1]) - uy * (c[0] - a[0]));
+      if (dot > -0.94 && area2 > 0.5) keep.push(b);
+    }
+    if (keep.length < 4) break;
+    out = keep;
+  }
+  return out;
+}
+// The tracer walks the centres of the edge pixels, so a traced outline sits half a pixel inside the true edge — on
+// a 0.5 mm line that is a fifth of its width. Push every point out by half a pixel (d > 0 grows the traced region —
+// the solid for an outline, the hole for a hole, since a hole is traced round its own pixels the same way).
+function grow(pts, d) {
+  const n = pts.length; if (n < 3) return pts;
+  let a2 = 0; for (let i = 0; i < n; i++) { const p = pts[i], q = pts[(i + 1) % n]; a2 += p[0] * q[1] - q[0] * p[1]; }
+  const sg = a2 > 0 ? -1 : 1; // which side of the walk is outside
+  return pts.map((b, i) => {
+    const a = pts[(i + n - 1) % n], c = pts[(i + 1) % n];
+    let ux = b[0] - a[0], uy = b[1] - a[1], vx = c[0] - b[0], vy = c[1] - b[1]; const lu = Math.hypot(ux, uy) || 1, lv = Math.hypot(vx, vy) || 1; ux /= lu; uy /= lu; vx /= lv; vy /= lv;
+    let nx = -(uy + vy), ny = ux + vx; const ln = Math.hypot(nx, ny); if (ln < 1e-6) return b; nx /= ln; ny /= ln;
+    return [b[0] + sg * nx * d, b[1] + sg * ny * d];
+  });
+}
+const smoothPx = (px, d = 0.5) => tidyPx(grow(chaikin(subdivide(rdp(px, 1.25)), 2), d)); // rdp above 1 px: a digital straight edge wanders up to a pixel, and a finer tolerance keeps its stair-steps as a zigzag
+// every solid piece of a fine mask as a Shape with its holes (cropped per piece, so hundreds of pieces stay fast)
+// Two pixels touching only at a corner are one piece to the outline tracer (it steps diagonally) but a gap to a
+// 4-way flood fill — the two disagree about whether the background there is a hole. Fill one pixel of every such
+// corner-to-corner pinch so they agree, and no hole ever touches its outline at a single point.
+function depinch(m, w, h) {
+  const o = m.slice();
+  for (let pass = 0; pass < 3; pass++) {
+    let n = 0;
+    for (let y = 0; y < h - 1; y++) for (let x = 0; x < w - 1; x++) {
+      const i = y * w + x, a = o[i], b = o[i + 1], c = o[i + w], d = o[i + w + 1];
+      if (a && d && !b && !c) { o[i + 1] = 1; n++; } else if (b && c && !a && !d) { o[i] = 1; n++; }
+    }
+    if (!n) break;
+  }
+  return o;
+}
+// Earcut (which caps every extrusion) can leave part of a cap untriangulated when separate outlines line up exactly
+// — two grooves cut off along the same straight edge, say — and the solid then has a hole in its top and bottom.
+// It can also lay a flat triangle across three points that happen to line up. So each shape is test-triangulated here
+// the way ExtrudeGeometry will do it. On a miss, the points are nudged a few
+// microns (far below anything a printer resolves) and tried again; if that fails, the offending holes are left out.
+function capArea(shape) {
+  const { shape: v0, holes: h0 } = shape.extractPoints(12);
+  let v = v0.slice(); const holes = h0.map(h => h.slice());
+  if (!THREE.ShapeUtils.isClockWise(v)) { v = v.reverse(); holes.forEach((h, i) => { if (THREE.ShapeUtils.isClockWise(h)) holes[i] = h.reverse(); }); }
+  const faces = THREE.ShapeUtils.triangulateShape(v, holes), all = v.concat(...holes);
+  let got = 0;
+  for (const f of faces) {
+    const a = all[f[0]], b = all[f[1]], c = all[f[2]], a2 = Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
+    if (a2 < 1.2e-4) return false; // a flat triangle across three points in line: the STL writer would drop it and leave a slit
+    got += a2 / 2;
+  }
+  const want = Math.abs(THREE.ShapeUtils.area(v)) - holes.reduce((t, h) => t + Math.abs(THREE.ShapeUtils.area(h)), 0);
+  return Math.abs(got - want) <= Math.max(0.005, want * 0.001);
+}
+function solidShape(outer, holes) {
+  const jit = (pts, k) => pts.map((p, i) => ({ x: p.x + (((i * 7919 + k * 104729) % 997) / 997 - 0.5) * 0.004, z: p.z + (((i * 104723 + k * 7907) % 991) / 991 - 0.5) * 0.004 }));
+  const make = (k, hs) => { const sh = shapeOf(k ? jit(outer, k) : outer); hs.forEach((h, j) => sh.holes.push(pathOf(k ? jit(h, k * 31 + j + 1) : h))); return sh; };
+  for (let k = 0; k < 5; k++) { const sh = make(k, holes); if (capArea(sh)) return sh; }
+  // still failing: leave out, one at a time, holes whose removal makes it triangulate (small shapes only — it is slow)
+  if (holes.length <= 24) for (let i = holes.length - 1; i >= 0; i--) { const trial = holes.slice(0, i).concat(holes.slice(i + 1)), sh = make(1, trial); if (capArea(sh)) return sh; }
+  if (globalThis.__decoCheck) { globalThis.__decoCheck.push({ capFail: holes.length }); if (globalThis.__failShapes) globalThis.__failShapes.push({ outer, holes }); }
+  return make(1, holes);
+}
+// One solid piece (cm: a crop with an empty 1 px border; crop pixel x,y is raster pixel x+ox, y+oy). A piece riddled with
+// holes — an engraved skin can carry a thousand — is split in two, overlapping by 0.4 mm, until each half carries a
+// sensible number: the cap triangulation slows down and gets fragile with very many holes, and overlapping solids
+// print as one.
+function traceCrop(D, cm, cw, ch, ox, oy, n, out, minPx, depth) {
+  const hl = new Int32Array(cw * ch), hs = new Int32Array(cw * ch), holes = []; let hid = 0;
+  for (let i = 0; i < cw * ch; i++) {
+    if (cm[i] || hl[i]) continue;
+    hid++; let sp = 0, border = false, hn = 0, hx0 = cw, hx1 = 0, hy0 = ch, hy1 = 0; hs[sp++] = i; hl[i] = hid;
+    while (sp) {
+      const j = hs[--sp], x = j % cw, y = (j / cw) | 0; hn++;
+      if (x === 0 || y === 0 || x === cw - 1 || y === ch - 1) border = true;
+      if (x < hx0) hx0 = x; if (x > hx1) hx1 = x; if (y < hy0) hy0 = y; if (y > hy1) hy1 = y;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { if (!dx && !dy) continue; const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= cw || ny >= ch) continue; const k = ny * cw + nx; if (!cm[k] && !hl[k]) { hl[k] = hid; hs[sp++] = k; } }
+    }
+    if (!border && hn >= minPx * 0.5) holes.push({ hid, hx0, hx1, hy0, hy1 });
+  }
+  if (holes.length > 60 && depth < 7 && Math.max(cw, ch) > 60) {
+    const vert = cw >= ch, mid = Math.floor((vert ? cw : ch) / 2);
+    for (const [lo, hi] of [[0, mid + 2], [mid - 2, (vert ? cw : ch) - 1]]) {
+      const sub = new Uint8Array(cw * ch);
+      for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) { const t = vert ? x : y; if (t >= lo && t <= hi) sub[y * cw + x] = cm[y * cw + x]; }
+      // the half may fall apart into several pieces
+      const lab = new Int32Array(cw * ch), st = new Int32Array(cw * ch); let id = 0;
+      for (let i = 0; i < cw * ch; i++) {
+        if (!sub[i] || lab[i]) continue; id++; let sp = 0, x0 = cw, x1 = 0, y0 = ch, y1 = 0, m = 0; st[sp++] = i; lab[i] = id;
+        while (sp) { const j = st[--sp], x = j % cw, y = (j / cw) | 0; m++; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+          if (x > 0 && sub[j - 1] && !lab[j - 1]) { lab[j - 1] = id; st[sp++] = j - 1; } if (x < cw - 1 && sub[j + 1] && !lab[j + 1]) { lab[j + 1] = id; st[sp++] = j + 1; }
+          if (y > 0 && sub[j - cw] && !lab[j - cw]) { lab[j - cw] = id; st[sp++] = j - cw; } if (y < ch - 1 && sub[j + cw] && !lab[j + cw]) { lab[j + cw] = id; st[sp++] = j + cw; } }
+        if (m < minPx) continue;
+        const sw = x1 - x0 + 3, sh = y1 - y0 + 3, sm = new Uint8Array(sw * sh);
+        for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (lab[y * cw + x] === id) sm[(y - y0 + 1) * sw + (x - x0 + 1)] = 1;
+        traceCrop(D, sm, sw, sh, ox + x0 - 1, oy + y0 - 1, m, out, minPx, depth + 1);
+      }
+    }
+    return;
+  }
+  const toMm = (dx, dy) => p => D.toMm(p[0] + dx + 0.5, p[1] + dy + 0.5);
+  const outer = smoothPx(traceMask(cm, cw, ch)).map(toMm(ox, oy)); if (outer.length < 6) return;
+  const holeList = [];
+  for (const hh of holes) {
+    const hw = hh.hx1 - hh.hx0 + 3, hH = hh.hy1 - hh.hy0 + 3, hm = new Uint8Array(hw * hH);
+    for (let y = hh.hy0; y <= hh.hy1; y++) for (let x = hh.hx0; x <= hh.hx1; x++) if (hl[y * cw + x] === hh.hid) hm[(y - hh.hy0 + 1) * hw + (x - hh.hx0 + 1)] = 1;
+    const hp = smoothPx(traceMask(hm, hw, hH), 0.5).map(toMm(ox + hh.hx0 - 1, oy + hh.hy0 - 1));
+    if (hp.length > 5) holeList.push(hp);
+  }
+  const shape = solidShape(outer, holeList); if (!shape) return;
+  out.push({ shape, n });
+  // test builds: every traced piece must cover the pixels it came from
+  if (globalThis.__decoCheck) { const A = Math.abs(THREE.ShapeUtils.area(shape.getPoints())) - shape.holes.reduce((t, q) => t + Math.abs(THREE.ShapeUtils.area(q.getPoints())), 0), px = n * D.res * D.res; if (Math.abs(A - px) > Math.max(0.6, px * 0.12)) globalThis.__decoCheck.push({ traced: +A.toFixed(2), pixels: +px.toFixed(2) }); }
+}
+function fastShapes(D, mask0, minPx = 30) {
+  const mask = depinch(mask0, D.w, D.h);
+  const { w, h } = D, lab = new Int32Array(w * h), stack = new Int32Array(w * h), comps = [];
+  for (let i = 0; i < w * h; i++) {
+    if (!mask[i] || lab[i]) continue;
+    const id = comps.length + 1; let sp = 0, x0 = w, x1 = 0, y0 = h, y1 = 0, n = 0; stack[sp++] = i; lab[i] = id;
+    while (sp) {
+      const j = stack[--sp], x = j % w, y = (j / w) | 0; n++;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      if (x > 0 && mask[j - 1] && !lab[j - 1]) { lab[j - 1] = id; stack[sp++] = j - 1; }
+      if (x < w - 1 && mask[j + 1] && !lab[j + 1]) { lab[j + 1] = id; stack[sp++] = j + 1; }
+      if (y > 0 && mask[j - w] && !lab[j - w]) { lab[j - w] = id; stack[sp++] = j - w; }
+      if (y < h - 1 && mask[j + w] && !lab[j + w]) { lab[j + w] = id; stack[sp++] = j + w; }
+    }
+    comps.push({ id, x0, x1, y0, y1, n });
+  }
+  const out = [];
+  for (const c of comps) {
+    if (c.n < minPx) continue;
+    const cw = c.x1 - c.x0 + 3, ch = c.y1 - c.y0 + 3, cm = new Uint8Array(cw * ch);
+    for (let y = c.y0; y <= c.y1; y++) for (let x = c.x0; x <= c.x1; x++) if (lab[y * w + x] === c.id) cm[(y - c.y0 + 1) * cw + (x - c.x0 + 1)] = 1;
+    traceCrop(D, cm, cw, ch, c.x0 - 1, c.y0 - 1, c.n, out, minPx, 0);
+  }
+  if (globalThis.__decoCheck) { let tot = 0; for (let i = 0; i < mask.length; i++) tot += mask[i]; const kept = out.reduce((t, o) => t + o.n, 0); if (kept < tot * 0.97) globalThis.__decoCheck.push({ dropped: tot - kept, of: tot }); }
+  return out;
+}
+function shapesToD(D, shapes) {
+  clearD(D); mmSpace(D); const c = D.ctx; c.fillStyle = '#000'; c.beginPath();
+  const add = pts => { pts.forEach((p, i) => i ? c.lineTo(p.x, p.y) : c.moveTo(p.x, p.y)); c.closePath(); };
+  for (const s of shapes) { add(s.getPoints(16)); s.holes.forEach(hh => add(hh.getPoints(16))); }
+  c.fill('evenodd'); pxSpace(D); return readD(D);
+}
+function primsToD(D, prims) {
+  clearD(D); mmSpace(D); const c = D.ctx; c.fillStyle = '#000';
+  for (const p of prims) { c.beginPath(); if (p.circle) c.arc(p.circle[0], p.circle[1], p.circle[2], 0, Math.PI * 2); else { p.poly.forEach((q, i) => i ? c.lineTo(q.x, q.z) : c.moveTo(q.x, q.z)); c.closePath(); } c.fill(); }
+  pxSpace(D); return readD(D);
+}
+// only the ink that is joined to the solid rim (pierced work: anything else would fall out)
+function keepAttached(D, ink, band) {
+  const { w, h } = D, lab = new Int32Array(w * h), stack = new Int32Array(w * h), keep = [0]; let id = 0;
+  for (let i = 0; i < w * h; i++) {
+    if (!ink[i] || lab[i]) continue; id++; let sp = 0, touch = false; stack[sp++] = i; lab[i] = id;
+    while (sp) { const j = stack[--sp], x = j % w; if (band[j]) touch = true; for (const k of [x > 0 ? j - 1 : -1, x < w - 1 ? j + 1 : -1, j - w, j + w]) if (k >= 0 && k < w * h && ink[k] && !lab[k]) { lab[k] = id; stack[sp++] = k; } }
+    keep.push(touch ? 1 : 0);
+  }
+  const o = new Uint8Array(w * h); for (let i = 0; i < w * h; i++) o[i] = lab[i] && keep[lab[i]] ? 1 : 0; return o;
+}
+// s: { P, R, group, region (coarse mask of the surface), yTop, parts: [{shape, h, y, name, bevel, pierce?}],
+//      window? (coarse mask that may be pierced), keep? (prims kept solid when pierced), keepOut? (prims never decorated) }
+// Builds the parts themselves (plain, shortened under an engraving, or pierced) and the ornament; returns a note.
+function decorate(s) {
+  const { P, group } = s, pre = s.prefix || '', mat = mats.body, kind = P.deco; let cut = P.cut || 'relief'; const proc = P.proc === 'resin' ? 'resin' : 'fdm', S = DECO[proc];
+  const seed = ((P.dseed | 0) || 1) * 101 + (s.seedOff || 0);
+  const plainPart = pt => group.add(pt.useB ? slabB(pt.shape, pt.h, pt.y, mat, pt.name, pt.bevel, pt.bevBot || 0) : slab(pt.shape, pt.h, pt.y, mat, pt.name, pt.bevel));
+  const plain = why => { s.parts.forEach(plainPart); return { done: false, why }; };
+  if (!kind || kind === 'none') return plain('none');
+  const regShapes = s.regionShapes || maskToShapes(s.R, s.region).map(r => r.shape); if (!regShapes.length) return plain('empty');
+  const pts = regShapes.flatMap(sh => sh.getPoints(8)), bb = { minX: 1e9, maxX: -1e9, minZ: 1e9, maxZ: -1e9 };
+  pts.forEach(p => { bb.minX = Math.min(bb.minX, p.x); bb.maxX = Math.max(bb.maxX, p.x); bb.minZ = Math.min(bb.minZ, p.y); bb.maxZ = Math.max(bb.maxZ, p.y); });
+  const D = makeDRaster(bb, 1.5);
+  const keepOut = s.keepOut && s.keepOut.length ? primsToD(D, s.keepOut) : null;
+  let fallback = false;
+  if (cut === 'pierce' && s.window) {
+    const winD = shapesToD(D, maskToShapes(s.R, s.window).map(r => r.shape)), keepD = s.keep && s.keep.length ? primsToD(D, s.keep) : null;
+    const plans = s.parts.filter(pt => pt.pierce).map(pp => {
+      const partD = shapesToD(D, [pp.shape]);
+      const border = Math.max(S.ring * 0.75, 2 * (pp.bevel || 0) + 1.0); // the solid frame round the openwork, wide enough for its own edge rounding
+      let W = andM(erodeM(D, winD, 0.3), erodeM(D, partD, border));
+      if (keepD) W = andM(W, keepD, true); if (keepOut) W = andM(W, keepOut, true);
+      return { pp, partD, W, area: countM(W) * D.res * D.res };
+    });
+    if (plans.some(pl => pl.area >= 20)) {
+      let areaMm = 0;
+      s.parts.filter(pt => !pt.pierce).forEach(plainPart);
+      plans.forEach(({ pp, partD, W, area }, k) => {
+        if (area < 20) { plainPart(pp); return; }
+        const Wp = andM(dilateM(D, W, 1.0), partD);
+        const ink = keepAttached(D, patternInk(kind, D, Wp, proc, seed + 17 * k, true), andM(Wp, W, true));
+        fastShapes(D, andM(partD, W, true)).forEach(q => plainPart({ ...pp, shape: q.shape }));
+        const onBed = pp.y < 0.01; // filigree in a floor starts on the bed with everything else
+        fastShapes(D, ink).forEach(q => group.add(slab(q.shape, pp.h - (onBed ? 0.03 : 0.06), pp.y + (onBed ? 0 : 0.03), mat, pre + 'filigree')));
+        areaMm += area;
+      });
+      return { done: true, cut, areaMm };
+    }
+  }
+  // pierced work needs open space beneath it; where there is none, the pattern is engraved instead
+  if (cut === 'pierce') { cut = 'engrave'; fallback = true; }
+  const maxBev = Math.max(0, ...s.parts.map(pt => pt.bevel || 0));
+  const ring = cut === 'engrave' ? Math.max(1.6, S.ring * 0.7) : Math.max(1.2, maxBev + 0.6, S.ring * 0.6);
+  const reg = shapesToD(D, regShapes), dist = edt(reg, D.w, D.h, true), bPx = ring / D.res;
+  let area = new Uint8Array(reg.length); for (let i = 0; i < area.length; i++) area[i] = dist[i] > bPx ? 1 : 0;
+  if (keepOut) area = andM(area, keepOut, true);
+  const areaMm = countM(area) * D.res * D.res; if (areaMm < 8) return plain('small');
+  const ink = patternInk(kind, D, area, proc, seed, false);
+  if (cut === 'relief') {
+    s.parts.forEach(plainPart);
+    fastShapes(D, ink).forEach(q => group.add(slab(q.shape, S.depth + 0.05, s.yTop - 0.05, mat, pre + 'decor-relief')));
+    return { done: true, cut, areaMm, ring };
+  }
+  // engraved: the parts stop `depth` short of the top, and one top layer — the whole surface less the cuts — finishes it
+  // (a part with the usual all-round rounding keeps it, shortened; the top layer reaches down past that rounding so
+  //  it never shows as a groove round the case)
+  const d = S.depth, under = Math.max(0, ...s.parts.filter(pt => !pt.useB).map(pt => pt.bevel || 0));
+  s.parts.forEach(pt => group.add(pt.useB ? slabB(pt.shape, pt.h - d, pt.y, mat, pt.name, 0, pt.bevBot || 0) : slab(pt.shape, pt.h - d, pt.y, mat, pt.name, pt.bevel)));
+  // the surface is re-traced here, and tracing can close a hole by a pixel: pulling every edge back a little over a pixel keeps
+  // peg holes and slots at least as open as the parts below them
+  const top = andM(erodeM(D, reg, Math.max(0.12, D.res * 1.3)), ink, true);
+  fastShapes(D, top).forEach(q => group.add(slab(q.shape, d + under + 0.05, s.yTop - d - under - 0.05, mat, pre + 'decor-top')));
+  return { done: true, cut, areaMm, ring, fallback };
+}
 const rowsCut = (mask, R, zc, keepAbove) => { const py = (zc - R.z0) / RES; const m = new Uint8Array(mask.length); for (let y = 0; y < R.h; y++) { const keep = keepAbove ? y >= py : y < py; if (keep) for (let x = 0; x < R.w; x++) m[y * R.w + x] = mask[y * R.w + x]; } return m; };
 const or = (m1, m2) => { const m = new Uint8Array(m1.length); for (let i = 0; i < m.length; i++) m[i] = m1[i] || m2[i] ? 1 : 0; return m; };
 const and = (m1, m2, not) => { const m = new Uint8Array(m1.length); for (let i = 0; i < m.length; i++) m[i] = m1[i] && (not ? !m2[i] : m2[i]) ? 1 : 0; return m; };
@@ -288,6 +534,7 @@ export function build(P) {
   const { locks, buttons } = state; const trace = state.trace;
   buttons.length = 0; // every clickable moving part registers here as it is built
   const g = new THREE.Group(); g.name = 'jaw-harp-case'; state.lidGroup = null; state.harpGroup = null;
+  const decoOn = !!(P.deco && P.deco !== 'none'), decoNotes = []; // what the ornament ended up on, for the fit check
   const HOLDS = ['bladeSide', 'bladeTop', 'spine', 'twin', 'lash', 'slide', 'swing'];
   const holdKind = style === 'deck' || style === 'pendant' ? (HOLDS.includes(P.hold) ? P.hold : 'bladeSide') : null;
   const bladeHold = holdKind === 'bladeSide' || holdKind === 'bladeTop';
@@ -409,8 +656,14 @@ export function build(P) {
     sides.forEach(s => { const ps = shapeOf(contour(R, and(outerMask, maskOf(R, [{ circle: [s.x, s.z, bossR] }], 0)))); ps.holes.push(circlePath(s.x, s.z, pegR + 0.3)); g.add(slab(ps, 2.4 + gap, Dlow, mats.body, 'gate-post')); });
     const roofT = 2.4, slotW = reedW + 2 * clr + 1.5;
     const roofMask = and(rowsCut(rowsCut(outerNoTab, R, zc, true), R, zStep + 0.01, false), maskOf(R, [rect(-slotW / 2, zc - 5, slotW / 2, zStep + 5)], 0), true);
-    [1, -1].forEach(sg => g.add(slab(shapeOf(contour(R, halfMask(roofMask, R, sg))), roofT, Dlow, mats.body, 'roof-' + (sg > 0 ? 'right' : 'left'), 0.6)));
-    g.add(slab(shapeOf(hood), D - Dlow, Dlow, mats.body, 'hood', bevel));
+    const halves = [1, -1].map(sg => ({ shape: shapeOf(contour(R, halfMask(roofMask, R, sg))), h: roofT, y: Dlow, name: 'roof-' + (sg > 0 ? 'right' : 'left'), bevel: 0.6, pierce: true }));
+    if (decoOn) {
+      decoNotes.push({ where: 'roof', ...decorate({ P, R, group: g, region: roofMask, yTop: Dlow + roofT, parts: halves, window: and(roofMask, chanMask), seedOff: 1 }) });
+      decoNotes.push({ where: 'hood', ...decorate({ P, R, group: g, region: hoodMask, yTop: D, parts: [{ shape: shapeOf(hood), h: D - Dlow, y: Dlow, name: 'hood', bevel }], seedOff: 2 }) });
+    } else {
+      halves.forEach(pt => g.add(slab(pt.shape, pt.h, pt.y, mats.body, pt.name, pt.bevel)));
+      g.add(slab(shapeOf(hood), D - Dlow, Dlow, mats.body, 'hood', bevel));
+    }
     g.add(slab(shapeOf(contour(R, and(rowsCut(maskOf(R, chanPrims, clr - 0.2), R, zc + 0.2, true), chanMask))), feltT, floorT, mats.felt, 'lining'));
   } else {
     // a deck layer: the outline with the pockets (and bail) as holes, or — when a notch joins a pocket to the outside — traced from a mask
@@ -424,7 +677,12 @@ export function build(P) {
       if (P.bail && list.length) holeAt(list, tabX, holeZ, holeR); // into whichever piece actually holds the bail tab (a hole outside its piece would be dropped by the triangulator and block the bail)
       return list;
     };
-    const addLayer = (list, hgt, y, name, bt = 0, bb = 0) => list.forEach(l => g.add(slabB(l.shape, hgt, y, mats.body, name, bt, bb)));
+    // the deck's top layer is held back when it carries an ornament, and built by decorate() below
+    const deckDecor = decoOn && (style === 'deck' || style === 'pendant' || style === 'multi') && holdKind !== 'slide', deckTops = [];
+    const addLayer = (list, hgt, y, name, bt = 0, bb = 0) => {
+      if (deckDecor && Math.abs(y + hgt - Dlow) < 1e-6 && name !== 'deck-floor') { deckTops.push({ list, hgt, y, name, bt, bb }); return; }
+      list.forEach(l => g.add(slabB(l.shape, hgt, y, mats.body, name, bt, bb)));
+    };
     // a hole at (x, z) goes into whichever piece of the layer contains that point
     const slotAt = (list, x, z) => { const [px, py] = R.toPx(x, z), k = (py | 0) * R.w + (px | 0); const l = list.find(q => q.mask[k]) || list[0]; if (l) l.shape.holes.push(pathOf(slotPts(x, z, LASH.hw, LASH.hl))); };
     const holeAt = (list, x, z, r) => { const [px, py] = R.toPx(x, z), k = (py | 0) * R.w + (px | 0); const l = list.find(q => q.mask[k]) || list[0]; if (l) l.shape.holes.push(circlePath(x, z, r)); };
@@ -439,18 +697,47 @@ export function build(P) {
     } else {
       buildHold(g, holdKind, { P, deckLayer, addLayer, frameTop, Dlow, floorT, xL: pbx.minX, xR: pbx.maxX, zRing, clr, frameT, wall, gap, R, tabX, zEnd: pb.minZ, footprint, outerNoTab, zStep, obNT, pb, lashGroove, LASH });
     }
+    if (deckTops.length) {
+      // keep the ornament off anything that moves across or sits on the deck
+      const keepOut = [];
+      if (holdKind === 'bladeTop') [pbx.minX, pbx.maxX].forEach((x, k) => keepOut.push(k ? rect(x - 3, zRing - 10, x + 30, zRing + 10) : rect(x - 30, zRing - 10, x + 3, zRing + 10)));
+      if (holdKind === 'twin' || holdKind === 'lash') keepOut.push(rect(-1e4, zRing - 9, 1e4, zRing + 9));
+      if (holdKind === 'spine') keepOut.push(rect(tabX - 8, -1e4, tabX + 8, pb.minZ + (holdD ? holdD.tunnelEnd : 12) + 3));
+      sides.forEach(sd => { const reach = sd.double ? (wall + 3) / 2 + clr + frameT + 3 : pivotOff + clr + frameT + 3; keepOut.push({ circle: [sd.x, sd.z, reach + 5] }); });
+      const parts = deckTops.flatMap(t => t.list.map(l => ({ shape: l.shape, h: t.hgt, y: t.y, name: t.name, bevel: t.bt, bevBot: t.bb, useB: true })));
+      decoNotes.push({ where: 'deck', ...decorate({ P, R, group: g, regionShapes: parts.map(pt => pt.shape), yTop: Dlow, parts, keepOut, seedOff: 5 }) });
+    }
     if (roofed) {
-      const hoodS = shapeOf(hood); if (hoodRing) pockets.forEach(p => hoodS.holes.push(pathOf(p))); g.add(slab(hoodS, D - Dlow, Dlow, mats.body, 'hood', bevel));
-      g.add(slab(shapeOf(contour(R, rowsCut(outerNoTab, R, zRoof, true))), 3, D - 3, mats.body, 'hood-roof', 0.8));
+      const hoodS = shapeOf(hood); if (hoodRing) pockets.forEach(p => hoodS.holes.push(pathOf(p)));
+      const roofM = rowsCut(outerNoTab, R, zRoof, true), roofS = shapeOf(contour(R, roofM));
+      if (decoOn) {
+        // the ornament runs over the whole top of the hood; pierced, it opens the roof over the pocket, keeping a
+        // solid pad where the trigger bears on it (that pad is what holds the harp's tip end down)
+        const hw = reedW / 2 + 2.5, pads = offs.map(dx => rect(trigger.x + dx - hw, trigger.z - 4, trigger.x + dx + hw, trigger.z + 7));
+        decoNotes.push({ where: 'hood', ...decorate({ P, R, group: g, region: or(hoodRing ? and(hoodMask, pocketMask, true) : hoodMask, roofM), yTop: D,
+          parts: [{ shape: hoodS, h: D - Dlow, y: Dlow, name: 'hood', bevel }, { shape: roofS, h: 3, y: D - 3, name: 'hood-roof', bevel: 0.8, pierce: true }],
+          window: and(roofM, pocketMask), keep: pads }) });
+      } else {
+        g.add(slab(hoodS, D - Dlow, Dlow, mats.body, 'hood', bevel));
+        g.add(slab(roofS, 3, D - 3, mats.body, 'hood-roof', 0.8));
+      }
     }
     pockets.forEach((p, i) => {
-      const fS = shapeOf(p), lS = shapeOf(felts[i]);
+      const fS = shapeOf(p), lS = shapeOf(felts[i]), floorName = 'pocket-floor' + (nb > 1 ? '-' + (i + 1) : '');
+      let floorDone = false;
       if (style === 'pendant') {
         // windows under the ring and under the reed only — every bar of the frame stays on solid floor
-        const wins = traced ? [contour(R, maskOf(R, [{ poly: trace.outline }], clr - 6))] : windows.map(w => contour(R, maskOf(R, shift([w], offs[i]), 0)));
-        wins.filter(w => w.length > 8).forEach(w => { fS.holes.push(pathOf(w)); lS.holes.push(pathOf(w)); });
+        const wins = (traced ? [contour(R, maskOf(R, [{ poly: trace.outline }], clr - 6))] : windows.map(w => contour(R, maskOf(R, shift([w], offs[i]), 0)))).filter(w => w.length > 8);
+        wins.forEach(w => lS.holes.push(pathOf(w)));
+        if (decoOn && P.cut === 'pierce' && wins.length) {
+          // pierced: the windows fill with filigree instead of standing open. The floor prints flat on the bed, so this
+          // works on a filament printer as well as in resin.
+          decoNotes.push({ where: 'floor', bed: true, ...decorate({ P, R, group: g, regionShapes: [shapeOf(p)], yTop: floorT + raise, window: maskOf(R, wins.map(w => ({ poly: w })), 0), seedOff: 6 + i,
+            parts: [{ shape: shapeOf(p), h: floorT + raise, y: 0.001, name: floorName, bevel: 0, pierce: true }] }) });
+          floorDone = true;
+        } else wins.forEach(w => fS.holes.push(pathOf(w)));
       }
-      g.add(slab(fS, floorT + raise, 0.001, mats.body, 'pocket-floor' + (nb > 1 ? '-' + (i + 1) : '')));
+      if (!floorDone) g.add(slab(fS, floorT + raise, 0.001, mats.body, floorName));
       g.add(slab(lS, feltT, floorT + raise, mats.felt, 'lining' + (nb > 1 ? '-' + (i + 1) : '')));
     });
   }
@@ -489,10 +776,13 @@ export function build(P) {
     const hr = 3.2, bore = 1.0, axisX = obNT.maxX + hr + gap, axisY = Dlow + hr; // Ø2 bore for a 1.75 mm filament pin
     const lid = new THREE.Group(); lid.name = 'lid';
     sinkFloor = Dlow + 0.01; // lid parts that start at the deck top must not sink into the base
-    const plateS = shapeOf(contour(R, rowsCut(outerNoTab, R, zStep, false))); lid.add(slab(plateS, lidT, Dlow, mats.body, 'lid-plate', 0.8));
+    const plateM = rowsCut(outerNoTab, R, zStep, false), plateS = shapeOf(contour(R, plateM));
+    if (!decoOn) lid.add(slab(plateS, lidT, Dlow, mats.body, 'lid-plate', 0.8));
     const hoodWall = contour(R, and(rowsCut(outerNoTab, R, zStep, true), pocketMask, true));
     lid.add(slab(shapeOf(hoodWall), D + lidT - Dlow, Dlow, mats.body, 'lid-hood', 0.8, 0.01)); // 0.01 inset: no vertices shared with the plate's bevel
-    lid.add(slab(shapeOf(contour(R, rowsCut(outerNoTab, R, zStep - lidT, true))), lidT, D, mats.body, 'lid-roof', 0.8));
+    const lroofM = rowsCut(outerNoTab, R, zStep - lidT, true), lroofS = shapeOf(contour(R, lroofM));
+    if (decoOn) decoNotes.push({ where: 'lid-roof', ...decorate({ P, R, group: lid, prefix: 'lid-', region: lroofM, yTop: D + lidT, parts: [{ shape: lroofS, h: lidT, y: D, name: 'lid-roof', bevel: 0.8 }], seedOff: 3 }) });
+    else lid.add(slab(lroofS, lidT, D, mats.body, 'lid-roof', 0.8));
     const capB = bboxOf(hood);
     const front = new THREE.Mesh(new THREE.BoxGeometry(capB.maxX - capB.minX - 0.6, D - Dlow - lidT + 0.01, lidT), mats.body); front.position.set((capB.maxX + capB.minX) / 2, Dlow + lidT + (D - Dlow - lidT) / 2, zStep - lidT / 2); front.name = 'lid-hood-front'; lid.add(front);
     // ---- sliding bolt latch: a bolt in a print-in-place channel on the plate slides 6 mm past the plate's end into a
@@ -521,6 +811,10 @@ export function build(P) {
       const kT = plateTop + chH + roofC, sec = new THREE.Shape(); sec.moveTo(tabX - chW, Dlow); sec.lineTo(tabX + chW, Dlow); sec.lineTo(tabX + chW, kT); sec.lineTo(tabX - chW, kT); sec.closePath();
       const tun = new THREE.Path(); tun.moveTo(tabX - bW / 2 - gap, plateTop); tun.lineTo(tabX + bW / 2 + gap, plateTop); tun.lineTo(tabX + bW / 2 + gap, plateTop + chH); tun.lineTo(tabX - bW / 2 - gap, plateTop + chH); tun.closePath(); sec.holes.push(tun);
       const kL = travel + 1.5, keeper = new THREE.Mesh(new THREE.ExtrudeGeometry(sec, { depth: kL, steps: 1, bevelEnabled: false }), mats.body); keeper.position.z = zE - gap - kL; keeper.name = 'bolt-keeper'; g.add(keeper);
+      if (decoOn) {
+        const keepOut = [rect(tabX - chW - 1.2, zE - kL - 2, tabX + chW + 1.2, z1 + 1.5), rect(-1e4, zStep - lidT - 1.5, 1e4, zStep + 1)];
+        decoNotes.push({ where: 'lid', bed: true, ...decorate({ P, R, group: lid, prefix: 'lid-', region: plateM, yTop: Dlow + lidT, parts: [{ shape: plateS, h: lidT, y: Dlow, name: 'lid-plate', bevel: 0.8, pierce: true }], window: and(plateM, pocketMask), keepOut, seedOff: 4 }) });
+      }
     }
     const zA = zc + 2, zB = zStep - 2, nK = 5, kl = (zB - zA) / nK, wx0 = obNT.maxX - 1.5, wx1 = axisX - bore - 0.4;
     for (let i = 0; i < nK; i++) {
@@ -595,7 +889,7 @@ export function build(P) {
     if (o.isMesh) o.geometry.scale(0.001, 0.001, 0.001);
     if (o.userData && o.userData.slide) { o.userData.base *= 0.001; o.userData.open *= 0.001; }
   });
-  const report = fitReport({ P, style, traced, trace, hb0, pb, zStep, zRoof, slideOut, trigger, tH, frameH, frameT, clr, floorT, feltT, Dlow, D, roofed, zRing, bowB, pocketMask, R, zc, holdKind });
+  const report = fitReport({ decoNotes, P, style, traced, trace, hb0, pb, zStep, zRoof, slideOut, trigger, tH, frameH, frameT, clr, floorT, feltT, Dlow, D, roofed, zRing, bowB, pocketMask, R, zc, holdKind });
   return { g, dims: { L: ob.maxZ - ob.minZ, W: ob.maxX - ob.minX, D: style === 'clam' ? D + 3 : D }, report };
 }
 
@@ -831,6 +1125,29 @@ function fitReport(c) {
     swing: 'Two turn-buttons on captive pegs. A firm quarter-turn frees each one after printing, and it clicks into place on a detent.',
   }[holdKind];
   if (holdNote) add('hold', true, 'info', holdNote);
+
+  // 5c. the ornament, and what the printing process means for it
+  const proc = P.proc === 'resin' ? 'resin' : 'fdm', notes = c.decoNotes || [];
+  if (P.deco && P.deco !== 'none') {
+    const nm = { damascus: 'The Damascus pattern', scroll: 'The scrollwork', flowers: 'The flowering vine', seigaiha: 'The seigaiha pattern' }[P.deco] || 'The pattern';
+    const WH = { hood: 'hood', roof: 'roof', lid: 'lid', 'lid-roof': 'lid', deck: 'deck', floor: 'floor windows' };
+    const names = list => [...new Set(list.map(n => WH[n.where]))].join(' and ');
+    const S = DECO[proc], done = notes.filter(n => n.done), pierced = done.filter(n => n.cut === 'pierce'), carved = done.filter(n => n.cut !== 'pierce');
+    if (!done.length) add('decor', false, 'warn', 'There is not enough flat top on this case to carry a pattern, so it prints plain. More hood coverage or a wider wall makes room.');
+    else if (P.cut === 'pierce') {
+      if (pierced.length) {
+        const mm2 = pierced.reduce((t, n) => t + (n.areaMm || 0), 0);
+        add('decor', true, 'info', `${nm} is pierced right through the ${names(pierced)} (${mm2.toFixed(0)} mm² of openwork) inside a solid border${pierced.some(n => n.where === 'hood') ? ', with a solid pad left over the trigger, which is what holds the tip end down' : ''}. Pieces that would have come loose are left out.${carved.length ? ` Where there is nothing open beneath it (the ${names(carved)}), it is engraved instead.` : ''}`);
+      } else add('decor', true, 'info', `Nothing on this case has open space beneath it wide enough to pierce, so ${nm.toLowerCase()} is engraved into the ${names(carved)} instead. The clamshell lid, the sleeve roof and the pendant floor can be pierced.`);
+      if (proc === 'fdm' && pierced.some(n => !n.bed)) add('decor-fdm', false, 'warn', 'Filigree over the open pocket would be printed in mid-air by a filament printer, and the strands would sag. Print this one in resin, or pick the clamshell or the pendant, whose openwork prints face down on the bed.', { proc: 'resin' });
+    } else add('decor', true, 'info', `${nm} is ${P.cut === 'engrave' ? `cut ${S.depth} mm into` : `raised ${S.depth} mm off`} the ${names(done)}, inside a plain border. Nothing in it is finer than ${Math.min(S.line, S.gap).toFixed(2)} mm, sized for ${proc === 'resin' ? 'a resin printer' : 'a 0.4 mm filament nozzle'}.`);
+  }
+  if (proc === 'resin') {
+    const moving = !(holdKind === 'lash' || holdKind === 'slide');
+    if (moving) add('resin-gap', (P.gap || 0.4) >= 0.55, 'warn', (P.gap || 0.4) >= 0.55
+      ? `Resin: the moving parts have ${(P.gap || 0.6).toFixed(2)} mm of air around them. Wash well in IPA, and work every latch free before the final cure, while the resin is still a little soft.`
+      : 'Resin fills gaps narrower than about half a millimetre, which would weld the latches shut. Widen the print gap to 0.6 mm.', { pgap: 0.6 });
+  }
 
   // 6. removal path (deck / pendant): tilt about the tips, slide back `slideOut`, lift
   let removal = null;

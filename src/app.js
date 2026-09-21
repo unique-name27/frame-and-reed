@@ -160,7 +160,7 @@ function rebuild() {
   const held = { deck: holdName + ' and the hood roof', sleeve: 'a turn-button gate at the mouth', clam: 'a hinged lid with a sliding bolt', pendant: holdName + ' over a windowed floor', multi: 'shared turn-buttons' }[style];
   $('summary').innerHTML = `<em>${sName}</em> for ${harpName}${style === 'multi' ? ` × ${P.bays}` : ''}, held by ${held}${P.bail ? ', with a bail' : ''}.`;
   document.querySelectorAll('.only-buttons').forEach(el => el.hidden = state.buttons.length === 0); // cord lashing has nothing to latch
-  renderFit(report); stopDemo();
+  renderFit(report); renderOrderNote(P); stopDemo();
   writeHash(); syncBox();
 }
 // ---------------- fit check ----------------
@@ -362,6 +362,39 @@ $('dl').addEventListener('click', async () => {
     }
   } catch (e) { setStatus('Something went wrong building the files: ' + (e.message || e), true); }
   btn.disabled = false;
+});
+// ---------------- have it printed for you ----------------
+// No backend and no money changing hands here: the STL goes to the viewer's own device and a printing
+// marketplace opens beside it, so the order is theirs to place with whichever shop they pick.
+function renderOrderNote(P) {
+  const note = $('ordernote'); if (!note) return;
+  const moving = !((style === 'deck' || style === 'pendant') && hold === 'lash');
+  note.innerHTML = moving
+    ? `<b>What to choose there:</b> FDM (some sites call it FFF) in PLA or PETG, 0.2 mm layers, no supports. The latches and the lid print already assembled, with ${P.pgap.toFixed(2)} mm of air around them — resin welds that air shut and nylon powder packs it solid. For SLS or MJF, widen the gap to 0.6 mm first${P.pgap < 0.55 ? ' <button id="gap6" class="btn ghost" type="button">set it to 0.6</button>' : ' (set)'} and expect to work the latches loose by hand.`
+    : `<b>What to choose there:</b> whatever is cheapest — this one has no moving parts, only slots for your own cord, so any process prints it. FDM in PLA or PETG at 0.2 mm layers is the usual answer; nylon (SLS or MJF) costs more and is close to unbreakable.`;
+}
+$('order').addEventListener('click', async () => {
+  setStatus('Saving the STL — upload it on the tab that just opened.');
+  try {
+    const f = buildFiles();
+    try {
+      for (const [n, buf] of f.stls) await saveFile(n, buf.slice(0), 'model/stl');
+      setStatus(f.stls.length > 1
+        ? 'Saved both halves. Upload the two files together — they are one case, quoted as two parts.'
+        : 'Saved. Upload it on the other tab, then pick FDM in PLA or PETG, 0.2 mm layers, no supports.');
+    } catch (e) {
+      if (e && e.code === 'rejected_extension') {
+        try { await saveFile(f.tag + '.zip', makeZip(f), 'application/zip'); setStatus('This host saves the files as a zip — unzip it and upload the .stl from inside.'); }
+        catch (e2) { dlError(e2); }
+      } else dlError(e);
+    }
+  } catch (e) { setStatus('Something went wrong building the files: ' + (e.message || e), true); }
+});
+$('printfor').addEventListener('click', e => {
+  if (e.target && e.target.id === 'gap6') {
+    $('pgap').value = 0.6; rebuild();
+    setStatus('Print gap widened to 0.6 mm, which is what nylon needs. Save the STL again before you upload it.');
+  }
 });
 $('dlzip').addEventListener('click', async () => {
   const btn = $('dlzip'); btn.disabled = true; setStatus('Building the print files…');

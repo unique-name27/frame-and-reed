@@ -160,6 +160,7 @@ details[open] summary::before{transform:rotate(45deg)}
 .actions .btn{width:100%;padding:12px 14px}
 .actions .btn .sub{font-family:var(--mono);font-weight:400;font-size:11px;color:var(--muted);margin-left:6px}
 .note{font-size:12.5px;color:var(--muted);margin:12px 0 0;line-height:1.5}
+.note button.btn{padding:0;border:0;background:none;font-size:inherit;line-height:inherit;text-decoration:underline;color:var(--accent)}
 .status{font-size:13px;margin:10px 0 0;min-height:1.2em;color:var(--ok)}
 .status.err{color:#c0392b}
 
@@ -258,6 +259,12 @@ footer{padding:16px clamp(16px,3vw,32px) 28px;font-family:var(--mono);font-size:
         <div class="row" style="display:flex;gap:8px;margin-top:8px"><input id="code" class="text" type="text" placeholder="Paste a design code" spellcheck="false" autocomplete="off"><button id="load" class="btn" type="button">Load</button></div>
       </details>
       <p class="status" id="status" aria-live="polite"></p>
+      <details id="printfor">
+        <summary>No printer? Have one printed and posted to you</summary>
+        <p class="note" style="margin-top:10px">The STL saves to this device first, then a printing marketplace opens in a second tab. Drop the file in there and it prices the job across a list of print shops. The order is between you and the shop you pick — nothing is bought or sold on this page.</p>
+        <div class="photo-row"><a id="order" class="btn primary" href="https://craftcloud3d.com/en/upload" target="_blank" rel="noopener">Save the STL and open the marketplace</a></div>
+        <p class="note" id="ordernote"></p>
+      </details>
       <p class="note">The STL is z-up, in millimetres, already sitting on the bed. Some styles come as more than one piece: the clamshell as a base and a lid in two files, the sliding cover as a plate laid out beside the case. The zip adds an OBJ with every part named and a text file of your settings. The harp and the felt are preview only, so they are not in the file.</p>
     </section>
   </div>

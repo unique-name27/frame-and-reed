@@ -212,7 +212,7 @@ window.addEventListener('resize', () => { if (!tracer.hidden) { fitTracer(); dra
 
 // ---- finish: photo px → mm in (across, along) axis coordinates ----
 function axisMap() {
-  const [a, b] = T.scale, pxLen = Math.hypot(b[0] - a[0], b[1] - a[1]), k = (+$('t-dist').value * IN) / pxLen;
+  const [a, b] = T.scale, pxLen = Math.hypot(b[0] - a[0], b[1] - a[1]), k = (+$('t-dist').value * (state.units === 'mm' ? 1 : IN)) / pxLen; // the length box is in the page's units
   const u = [(b[0] - a[0]) / pxLen, (b[1] - a[1]) / pxLen], v = [-u[1], u[0]];
   return p => ({ x: ((p[0] - a[0]) * v[0] + (p[1] - a[1]) * v[1]) * k, z: ((p[0] - a[0]) * u[0] + (p[1] - a[1]) * u[1]) * k });
 }

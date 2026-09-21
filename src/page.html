@@ -34,6 +34,8 @@ h1,h2,h3{margin:0;font-weight:400;text-wrap:balance}
 .mast .brand{font-family:var(--serif);font-size:30px;letter-spacing:-.01em;line-height:1}
 .mast .brand em{font-style:italic;color:var(--accent)}
 .mast .tag{font-family:var(--serif);font-style:italic;font-size:19px;color:var(--muted)}
+.mast .units{flex:0 0 auto}
+.mast .units button{flex:0 0 auto;padding:5px 12px;font-size:13px}
 .mast .meta{font-family:var(--mono);font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
 
 /* tool layout */
@@ -200,6 +202,7 @@ footer{padding:16px clamp(16px,3vw,32px) 28px;font-family:var(--mono);font-size:
 
 <header class="mast">
   <h1 class="brand">Jaw Harp Case Generator</h1>
+  <div class="seg units" id="units" role="group" aria-label="Units"><button type="button" data-u="mm">mm</button><button type="button" data-u="in">inches</button></div>
 </header>
 
 <main class="tool">
@@ -216,7 +219,7 @@ footer{padding:16px clamp(16px,3vw,32px) 28px;font-family:var(--mono);font-size:
       <p class="lede" style="margin:18px 0 10px">Or start from one of these:</p>
       <div class="presets" id="presets"></div>
       <div class="traced" id="traced">
-        The pocket is cut from <b>your outline</b> now. Height, hood and wall still adjust below.
+        The pocket is cut from <b>your outline</b> now, smoothed and given a little extra room so the harp slides in. Height, hood and wall still adjust below.
         <div class="row"><button id="retrace" class="btn" type="button">Retrace</button><button id="untrace" class="btn ghost" type="button">Back to stock sizes</button></div>
       </div>
       <details id="adjust">
@@ -227,7 +230,7 @@ footer{padding:16px clamp(16px,3vw,32px) 28px;font-family:var(--mono);font-size:
           <div class="field param"><label for="span">Arm span <output id="o-span"></output></label><input id="span" type="range" min="0.3" max="1.6" step="0.05" value="0.55"></div>
           <div class="field"><label for="arm">Frame bar <output id="o-arm"></output></label><input id="arm" type="range" min="3" max="12" step="0.5" value="4"></div>
           <div class="field"><label for="trig">Height to trigger tip <span class="sub">harp lying flat</span> <output id="o-trig"></output></label><input id="trig" type="range" min="0.5" max="1.6" step="0.05" value="0.9"></div>
-          <div class="field"><label for="thick">Frame thickness <output id="o-thick"></output></label><input id="thick" type="range" min="2" max="8" step="0.5" value="4"></div>
+          <div class="field"><label for="thick">Frame thickness <output id="o-thick"></output></label><input id="thick" type="range" min="2" max="10" step="0.25" value="4"></div>
           <div class="field param"><label for="tail">Reed tail <span class="sub">past the bow</span> <output id="o-tail"></output></label><input id="tail" type="range" min="0" max="1.2" step="0.05" value="0"></div>
         </div>
       </details>
@@ -242,6 +245,7 @@ footer{padding:16px clamp(16px,3vw,32px) 28px;font-family:var(--mono);font-size:
       <details>
         <summary>Fine-tune the case</summary>
         <label class="toggle"><input id="bail" type="checkbox" checked> Necklace bail</label>
+        <label class="toggle only-roof"><input id="roof" type="checkbox" checked> Roof over the reed tip <span class="sub">holds the tip end down</span></label>
         <div class="field"><label for="hood">Hood coverage <output id="o-hood"></output></label><input id="hood" type="range" min="20" max="75" step="1" value="45"></div>
         <div class="grid2">
           <div class="field"><label for="wall">Wall <output id="o-wall"></output></label><input id="wall" type="range" min="3" max="10" step="0.5" value="6"></div>
@@ -310,33 +314,33 @@ footer{padding:16px clamp(16px,3vw,32px) 28px;font-family:var(--mono);font-size:
 <section class="more">
   <div>
     <h3>About the fit</h3>
-    <p>It all comes from the outline of your harp. The pocket is that outline plus whatever clearance you set, the hood only rises where the trigger is, and the deck sits 1.5 mm over the frame, so the case is no thicker than it has to be.</p>
+    <p>It all comes from the outline of your harp. The pocket is that outline plus whatever clearance you set, the hood only rises where the trigger is, and the deck sits <span class="len" data-mm="1.5"></span> over the frame, so the case is no thicker than it has to be.</p>
     <p>Photos work best on plain paper, harp lying flat, nothing else in the shot. The outline gets scaled by the length you type in, so measure that one dimension properly and the rest follows. Two things a photo cannot see, so you type those as well: how tall the harp is lying flat, underside to the tip of the trigger, and how thick the frame is. The stock sizes follow the real families, so a forged European bow, a stamped Hohner-pattern frame or a Yakut khomus will land close. If yours is none of them, trace one side by hand and the other side mirrors.</p>
   </div>
   <div>
     <h3>Specification</h3>
     <dl class="spec">
       <dt>Material</dt><dd>PLA or PETG · 0.2 mm layers · 4 perimeters</dd>
-      <dt>Deck over frame</dt><dd>1.5 mm · roof 2 mm over the trigger tip</dd>
-      <dt>Wall</dt><dd>6 mm default (3–10)</dd>
-      <dt>Clearance</dt><dd>1.5 mm default (0.5–3)</dd>
-      <dt>Lining</dt><dd>0.6 mm wool felt, glued</dd>
-      <dt>Sliding latches</dt><dd>1.6 mm blades in a tunnel, or 5 × 3 mm bolts in covered channels; detent at each end of the travel</dd>
-      <dt>Turn-buttons</dt><dd>7 × 3 mm bar on a captive Ø4 peg, Ø6 head in a chamber</dd>
-      <dt>Cord lashing</dt><dd>3.4 × 8.6 mm slots, 2 mm off the pocket wall, into a 6 × 2 mm groove across the deck; cord is yours to supply</dd>
-      <dt>Sliding cover</dt><dd>2.4 mm plate in a 3 mm groove, detent bump behind the pocket</dd>
-      <dt>Hood roof</dt><dd>3 mm, over the trigger end; the harp slides back out from under it</dd>
+      <dt>Deck over frame</dt><dd><span class="len" data-mm="1.5"></span> · roof <span class="len" data-mm="2"></span> over the trigger tip</dd>
+      <dt>Wall</dt><dd><span class="len" data-mm="6"></span> default (<span class="len" data-mm="3,10" data-sep="–"></span>)</dd>
+      <dt>Clearance</dt><dd><span class="len" data-mm="1.5"></span> default (<span class="len" data-mm="0.5,3" data-sep="–"></span>)</dd>
+      <dt>Lining</dt><dd><span class="len" data-mm="0.6"></span> wool felt, glued</dd>
+      <dt>Sliding latches</dt><dd><span class="len" data-mm="1.6"></span> blades in a tunnel, or <span class="len" data-mm="5,3"></span> bolts in covered channels; detent at each end of the travel</dd>
+      <dt>Turn-buttons</dt><dd><span class="len" data-mm="7,3"></span> bar on a captive <span class="len" data-mm="4" data-pre="Ø"></span> peg, <span class="len" data-mm="6" data-pre="Ø"></span> head in a chamber</dd>
+      <dt>Cord lashing</dt><dd><span class="len" data-mm="3.4,8.6"></span> slots, <span class="len" data-mm="2"></span> off the pocket wall, into a <span class="len" data-mm="6,2"></span> groove across the deck; cord is yours to supply</dd>
+      <dt>Sliding cover</dt><dd><span class="len" data-mm="2.4"></span> plate in a <span class="len" data-mm="3"></span> groove, detent bump behind the pocket</dd>
+      <dt>Hood roof</dt><dd><span class="len" data-mm="3"></span>, over the trigger end; the harp slides back out from under it</dd>
       <dt>Sleeve gate</dt><dd>captive turn-button at the mouth</dd>
-      <dt>Lid latch</dt><dd>5 × 3 mm sliding bolt in a roofed channel, 6 mm throw into a keeper tunnel</dd>
-      <dt>Hinge</dt><dd>5 knuckles, Ø6.4 on a shelf, Ø2 bore, 1.75 mm filament pin</dd>
-      <dt>Bail</dt><dd>Ø6.5 hole, 5 mm rim</dd>
+      <dt>Lid latch</dt><dd><span class="len" data-mm="5,3"></span> sliding bolt in a roofed channel, <span class="len" data-mm="6"></span> throw into a keeper tunnel</dd>
+      <dt>Hinge</dt><dd>5 knuckles, <span class="len" data-mm="6.4" data-pre="Ø"></span> on a shelf, <span class="len" data-mm="2" data-pre="Ø"></span> bore, 1.75 mm filament pin</dd>
+      <dt>Bail</dt><dd><span class="len" data-mm="6.5" data-pre="Ø"></span> hole, <span class="len" data-mm="5"></span> rim</dd>
     </dl>
   </div>
   <div>
     <h3>Printing it</h3>
     <p>Slice it as it comes: flat on the bed, no supports, 0.4 mm nozzle, 0.2 mm layers. At that layer height the 0.4 mm print gap works out to exactly two layers of air above and below anything that moves. Leave the slicer's union of overlapping shells switched on. It is the default in PrusaSlicer, Bambu Studio and Cura, and the file counts on it.</p>
-    <p>Print the first one in PLA. PETG likes to weld itself across small gaps and you can end up with a latch that never frees; if you want PETG anyway, set the print gap to 0.5 first. A latch that will not shift usually just needs a firmer push, since the first movement has to break the print skin.</p>
-    <p>The clamshell prints as a base and a lid, and a short piece of 1.75 mm filament through the hinge knuckles, snipped flush, is the pin. The sliding cover prints flat beside the case and slides in afterwards. Cord lashing needs about 300 mm of 2 to 3 mm cord, or shock cord if you would rather it snapped back.</p>
+    <p>Print the first one in PLA. PETG likes to weld itself across small gaps and you can end up with a latch that never frees; if you want PETG anyway, set the print gap to <span class="len" data-mm="0.5"></span> first. A latch that will not shift usually just needs a firmer push, since the first movement has to break the print skin.</p>
+    <p>The clamshell prints as a base and a lid, and a short piece of 1.75 mm filament through the hinge knuckles, snipped flush, is the pin. The sliding cover prints flat beside the case and slides in afterwards. Cord lashing needs about <span class="len" data-mm="300"></span> of <span class="alt" data-mm="2 to 3 mm" data-in="3/32 to 1/8 in"></span> cord, or shock cord if you would rather it snapped back.</p>
     <p>A design code is the whole design as one line of text, traced outline and all. Paste someone else's in and you get their case.</p>
   </div>
 </section>
@@ -347,7 +351,7 @@ footer{padding:16px clamp(16px,3vw,32px) 28px;font-family:var(--mono);font-size:
     <span class="tstep" id="t-step"></span>
     <span class="thint" id="t-hint"></span>
     <span id="t-detect"><button id="t-alt" class="btn" type="button">Try another outline</button></span>
-    <label class="dist" id="t-scale-wrap">Harp length <input id="t-dist" class="text" type="number" step="0.05" value="4"> in</label>
+    <label class="dist" id="t-scale-wrap">Harp length <input id="t-dist" class="text" type="number" step="0.05" value="4"> <span class="u-len">in</span></label>
     <button id="t-swap" class="btn" type="button" hidden>Swap ends</button>
     <button id="t-hand" class="btn ghost" type="button">Trace by hand</button>
     <button id="t-undo" class="btn ghost" type="button">Undo</button>

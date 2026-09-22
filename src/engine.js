@@ -10,7 +10,7 @@ export const mats = {
   body:   Object.assign(new THREE.MeshStandardMaterial({ color: 0x1c1917, roughness: 0.62, metalness: 0.02 }), { name: 'body-petg' }),
   felt:   Object.assign(new THREE.MeshStandardMaterial({ color: 0x5a0e38, roughness: 1.0, metalness: 0 }), { name: 'lining-felt' }),
   accent: Object.assign(new THREE.MeshStandardMaterial({ color: 0xd8b064, roughness: 0.45, metalness: 0.3 }), { name: 'accent-petg' }),
-  ti:     Object.assign(new THREE.MeshStandardMaterial({ color: 0x8a5fc8, roughness: 0.32, metalness: 0.4 }), { name: 'anodized-titanium' }),
+  ti:     Object.assign(new THREE.MeshStandardMaterial({ color: 0xaab2bb, roughness: 0.35, metalness: 0.55 }), { name: 'anodized-titanium' }),
 };
 
 // Bow outlines by harp family. f = bow length ÷ width; neck = how far the shoulders taper before the arms run parallel.

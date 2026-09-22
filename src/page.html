@@ -1,24 +1,27 @@
 <title>Jaw Harp Case Generator</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600&family=Barlow:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
 :root{
-  --bg:#f2f1f4; --surface:#ffffff; --ink:#18171c; --muted:#6a6774; --line:#dcdae3; --line-strong:#b9b6c4;
-  --accent:#6a48c4; --accent-ink:#ffffff; --accent-soft:#ebe5fb; --brass:#b8923f; --stage:#e9e7ee; --stage-ink:#2b2933;
-  --ok:#2f7a4f; --shadow:0 1px 2px rgba(24,23,28,.08),0 8px 24px -12px rgba(24,23,28,.25);
-  --serif:"Instrument Serif",Georgia,"Times New Roman",serif; --sans:"Instrument Sans","Helvetica Neue",Arial,sans-serif; --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --bg:#e9ecea; --surface:#f7f8f6; --ink:#1d2226; --muted:#5b646b; --line:#c6ccc9; --line-strong:#8e979c; --rule:#1d2226;
+  --accent:#1d4e89; --accent-ink:#f7f8f6; --accent-soft:#dde6ef; --brass:#a4731d; --stage:#f4f5f2; --stage-ink:#1d2226;
+  --grid-major:rgba(29,78,137,.11); --grid-minor:rgba(29,78,137,.05);
+  --ok:#2e6b3f; --bad:#b3261e; --shadow:0 1px 2px rgba(29,34,38,.12),0 8px 24px -12px rgba(29,34,38,.3);
+  --serif:"Barlow Semi Condensed","Arial Narrow",sans-serif; --sans:"Barlow","Helvetica Neue",Arial,sans-serif; --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
   color-scheme:light;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --bg:#141318; --surface:#1c1b22; --ink:#ecebf1; --muted:#9b98a8; --line:#2d2b37; --line-strong:#45425a;
-  --accent:#a78bf5; --accent-ink:#15121f; --accent-soft:#2a2442; --brass:#d3ad5c; --stage:#1a1920; --stage-ink:#d9d6e4;
-  --ok:#6fcf97; --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.6); color-scheme:dark;
+  --bg:#0f1c2e; --surface:#132338; --ink:#e4ecf5; --muted:#93a6bd; --line:#24384f; --line-strong:#4a6582; --rule:#9fb7d1;
+  --accent:#7fb2ec; --accent-ink:#0f1c2e; --accent-soft:#1b3352; --brass:#d8b060; --stage:#112034; --stage-ink:#e4ecf5;
+  --grid-major:rgba(160,195,235,.13); --grid-minor:rgba(160,195,235,.055);
+  --ok:#7fcf95; --bad:#f08a80; --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.6); color-scheme:dark;
 }}
 :root[data-theme="dark"]{
-  --bg:#141318; --surface:#1c1b22; --ink:#ecebf1; --muted:#9b98a8; --line:#2d2b37; --line-strong:#45425a;
-  --accent:#a78bf5; --accent-ink:#15121f; --accent-soft:#2a2442; --brass:#d3ad5c; --stage:#1a1920; --stage-ink:#d9d6e4;
-  --ok:#6fcf97; --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.6); color-scheme:dark;
+  --bg:#0f1c2e; --surface:#132338; --ink:#e4ecf5; --muted:#93a6bd; --line:#24384f; --line-strong:#4a6582; --rule:#9fb7d1;
+  --accent:#7fb2ec; --accent-ink:#0f1c2e; --accent-soft:#1b3352; --brass:#d8b060; --stage:#112034; --stage-ink:#e4ecf5;
+  --grid-major:rgba(160,195,235,.13); --grid-minor:rgba(160,195,235,.055);
+  --ok:#7fcf95; --bad:#f08a80; --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.6); color-scheme:dark;
 }
 *{box-sizing:border-box}
 html,body{height:100%}
@@ -55,7 +58,7 @@ h1,h2,h3{margin:0;font-weight:400;text-wrap:balance}
 .chip:hover{border-color:var(--accent)}
 #dims{font-family:var(--mono);font-size:12px;color:var(--stage-ink);text-align:right;line-height:1.5;background:color-mix(in srgb,var(--surface) 82%,transparent);padding:8px 12px;border-radius:6px;border:1px solid var(--line)}
 #dims b{font-weight:500;font-size:14px}
-.hint{font-family:var(--serif);font-style:italic;font-size:15px;color:var(--muted);position:absolute;left:50%;top:14px;transform:translateX(-50%);white-space:nowrap;pointer-events:none;transition:opacity .6s}
+.hint{font-family:var(--serif);font-style:italic;font-size:15px;color:var(--muted);position:absolute;left:16px;top:58px;max-width:min(52ch,calc(100% - 32px));pointer-events:none;transition:opacity .6s}
 /* a narrow stage has no room for the readout beside the buttons, so stack them */
 @container (max-width:560px){
   .hudfoot{position:absolute;left:12px;right:12px;bottom:12px;display:flex;flex-direction:column;align-items:flex-start;gap:8px}
@@ -151,13 +154,13 @@ details[open] summary::before{transform:rotate(45deg)}
 .fit-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
 .fit .lbl{font-size:13px;font-weight:500}
 #fit-sum{font-size:12px;color:var(--muted)}
-#fit-sum.bad{color:#c0392b}
+#fit-sum.bad{color:var(--bad)}
 #fit-sum.good{color:var(--ok)}
 .fit ul{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:7px}
 .fit li{display:grid;grid-template-columns:16px 1fr auto;gap:8px;font-size:13px;line-height:1.4;align-items:start}
 .fit li .ic{font-weight:600;font-family:var(--mono)}
 .fit li.ok .ic{color:var(--ok)}
-.fit li.bad .ic{color:#c0392b}
+.fit li.bad .ic{color:var(--bad)}
 .fit li.bad{color:var(--ink)}
 .fit li.warn .ic{color:var(--brass)}
 .fit li.info .ic{color:var(--muted)}
@@ -174,7 +177,7 @@ details[open] summary::before{transform:rotate(45deg)}
 .note{font-size:12.5px;color:var(--muted);margin:12px 0 0;line-height:1.5}
 .note button.btn{padding:0;border:0;background:none;font-size:inherit;line-height:inherit;text-decoration:underline;color:var(--accent)}
 .status{font-size:13px;margin:10px 0 0;min-height:1.2em;color:var(--ok)}
-.status.err{color:#c0392b}
+.status.err{color:var(--bad)}
 
 /* below the fold */
 .more{padding:40px clamp(16px,3vw,32px) 24px;border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:32px 48px;max-width:1240px}
@@ -195,9 +198,33 @@ footer{padding:16px clamp(16px,3vw,32px) 28px;font-family:var(--mono);font-size:
 #tbar .dist input{width:70px}
 #tcanvas{flex:1;cursor:crosshair;touch-action:none;display:block}
 #boot{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:30;max-width:min(92vw,560px);padding:10px 16px;border-radius:8px;background:var(--surface);color:var(--ink);border:1px solid var(--line-strong);box-shadow:var(--shadow);font-size:13.5px;line-height:1.4;text-align:center}
-#boot.err{border-color:#c0392b;color:#c0392b}
+#boot.err{border-color:var(--bad);color:var(--bad)}
 #boot[hidden]{display:none}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* drafting-sheet look */
+.field>label{flex-wrap:wrap;row-gap:0}
+.field>label output{order:1;margin-left:auto;white-space:nowrap}
+.field>label .sub{order:2;flex-basis:100%;font-size:11px}
+body{font-size:15px}
+.mast{border-bottom:2px solid var(--rule);padding-block:12px}
+.mast .brand{font-weight:600;text-transform:uppercase;letter-spacing:.06em;font-size:22px}
+.rail{background:var(--surface);border-right:2px solid var(--rule)}
+.step h2{font-weight:600;text-transform:uppercase;letter-spacing:.05em;font-size:19px;gap:10px}
+.step h2 .num{border:1.5px solid var(--rule);color:var(--ink);padding:1px 6px;font-size:11px;min-width:0}
+.preset,.style,.btn,.seg,.fit,.text,.traced,#dims{border-radius:0}
+.preset,.style{background:transparent;border-color:var(--line-strong)}
+.preset[aria-pressed=true],.style[aria-pressed=true]{background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent);border-color:var(--accent)}
+.preset .n,.style .n{font-weight:600}
+.btn.primary{letter-spacing:.03em}
+.stage-wrap{background-color:var(--stage);background-image:linear-gradient(var(--grid-major) 1px,transparent 1px),linear-gradient(90deg,var(--grid-major) 1px,transparent 1px),linear-gradient(var(--grid-minor) 1px,transparent 1px),linear-gradient(90deg,var(--grid-minor) 1px,transparent 1px);background-size:50px 50px,50px 50px,10px 10px,10px 10px}
+.chip{border-radius:0;background:var(--surface);backdrop-filter:none}
+#dims{border:2px solid var(--rule);background:var(--surface)}
+.hint{font-family:var(--mono);font-style:normal;font-size:12px}
+.summary{font-weight:500;font-size:19px}
+.more h3{font-weight:600;text-transform:uppercase;letter-spacing:.05em;font-size:18px}
+summary{color:var(--ink);text-transform:uppercase;letter-spacing:.06em;font-size:12px}
+
 </style>
 
 <header class="mast">

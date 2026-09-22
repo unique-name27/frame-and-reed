@@ -138,7 +138,7 @@ const toCv = p => [p[0] * view.s + view.ox, p[1] * view.s + view.oy];
 function drawTracer() {
   tctx.clearRect(0, 0, tc.width, tc.height);
   tctx.drawImage(T.img, view.ox, view.oy, T.img.width * view.s, T.img.height * view.s);
-  const css = getComputedStyle(document.body), acc = css.getPropertyValue('--accent').trim() || '#6a48c4', axis = '#d6006c', dpr = devicePixelRatio;
+  const css = getComputedStyle(document.body), acc = css.getPropertyValue('--accent').trim() || '#1d4e89', axis = '#d6006c', dpr = devicePixelRatio;
   const dot = (p, col, r = 5) => { const [x, y] = toCv(p); tctx.beginPath(); tctx.arc(x, y, r * dpr, 0, Math.PI * 2); tctx.fillStyle = col; tctx.fill(); tctx.lineWidth = 2 * dpr; tctx.strokeStyle = '#fff'; tctx.stroke(); };
   const path = (pts, close) => { tctx.beginPath(); pts.forEach((p, i) => { const [x, y] = toCv(p); i ? tctx.lineTo(x, y) : tctx.moveTo(x, y); }); if (close) tctx.closePath(); tctx.stroke(); };
   tctx.lineWidth = 2 * dpr;

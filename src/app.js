@@ -91,13 +91,19 @@ class Stage {
   setObject(g, keepView) {
     if (this.obj) { this.scene.remove(this.obj); this.obj.traverse(o => { if (o.isMesh) { o.geometry.dispose(); if (o.material.map) o.material.map.dispose(); } }); }
     this.obj = g; this.scene.add(g);
+    // the view is kept while the case changes a little; when it grows or shrinks a lot (a bass harp after a small one,
+    // a rack of five) it is re-framed, from the same side the person was looking
     if (!keepView) this.frame();
+    else if (this.framedR) { const r = this.radius(); if (r > this.framedR * 1.3 || r < this.framedR * 0.7) this.frame(true); }
   }
-  frame() {
+  radius() { const box = new THREE.Box3().setFromObject(this.obj), s = new THREE.Sphere(); box.getBoundingSphere(s); return s.radius; }
+  frame(keepDir) {
     const box = new THREE.Box3().setFromObject(this.obj), s = new THREE.Sphere(); box.getBoundingSphere(s);
     const d = s.radius / Math.sin(THREE.MathUtils.degToRad(this.camera.fov / 2)) * 1.0;
+    const dir = keepDir ? this.camera.position.clone().sub(this.controls.target).normalize() : new THREE.Vector3(-0.55, 0.62, 0.85).normalize();
+    this.framedR = s.radius;
     this.controls.target.copy(s.center);
-    this.camera.position.copy(s.center).add(new THREE.Vector3(-0.55, 0.62, 0.85).normalize().multiplyScalar(d));
+    this.camera.position.copy(s.center).add(dir.multiplyScalar(d));
     this.camera.near = d / 100; this.camera.far = d * 20; this.camera.updateProjectionMatrix();
     this.controls.update();
   }
@@ -470,7 +476,9 @@ function settingsCard() {
       : `${fileTag()}.stl   all printed parts, z-up, millimetres. Slice flat, no supports, 0.4 mm nozzle, 0.2 mm layers (the print gap is then two layers of air).`,
     'case.obj     the same parts named (case.mtl), y-up, millimetres.',
     style === 'clam' ? `The bolt prints in place in its channel with ${fmtLen('pgap', P.pgap)} of air all round; slide it back once after printing to break it free.`
-      : style === 'sleeve' || style === 'multi' ? `The turn-buttons print in place on captive pegs with ${fmtLen('pgap', P.pgap)} of air all round. A firm quarter-turn frees each one after printing.`
+      : style === 'sleeve' ? `The gate prints in place on a captive peg with ${fmtLen('pgap', P.pgap)} of air all round; a firm quarter-turn frees it. Its pad prints on a loose post standing on the bed just past the mouth: pick the post off afterwards.`
+      : style === 'multi' ? `The turn-buttons print in place on captive pegs with ${fmtLen('pgap', P.pgap)} of air all round. A firm quarter-turn frees each one after printing.`
+      : hold === 'swing' ? `The turn-buttons print in place on captive pegs with ${fmtLen('pgap', P.pgap)} of air all round; a firm quarter-turn frees each one. The pad under each bar prints on a loose post that stands on the bed through a slot in the pocket floor: push the two posts out from underneath afterwards (the felt covers the slots).`
       : hold === 'lash' ? 'No moving parts: thread your own cord or shock cord up through one slot, over the frame bar, down the other, and tie it under the case.'
       : hold === 'slide' ? `The cover is the separate flat plate beside the case on the bed. Slide it in from the open end until it clicks over the bump. Everything has ${fmtLen('pgap', P.pgap)} of air around it.`
       : `Moving parts print in place with ${fmtLen('pgap', P.pgap)} of air all round. Slide latches print retracted: push each one home after printing and it clicks into a detent at both ends of its travel. Print the first one in PLA (PETG welds across small gaps).`,

@@ -169,9 +169,11 @@ function cleanPoly(pts) {
     changed = false;
     for (let i = 0; i < out.length && out.length > 3; i++) {
       const a = out[(i + out.length - 1) % out.length], b = out[i], c = out[(i + 1) % out.length];
-      const dup = Math.hypot(b.x - a.x, b.z - a.z) < 1e-7;
+      // points closer than 0.02 mm, and ones that sit on the line between their neighbours, only give the bevel
+      // generator slivers to fold over (a non-manifold edge in the file)
+      const dup = Math.hypot(b.x - a.x, b.z - a.z) < 0.02;
       const area = Math.abs((b.x - a.x) * (c.z - a.z) - (b.z - a.z) * (c.x - a.x));
-      if (dup || area < 1e-12) { out.splice(i, 1); i--; changed = true; }
+      if (dup || area < 1e-6) { out.splice(i, 1); i--; changed = true; }
     }
   }
   return out;
@@ -213,16 +215,39 @@ function safeShape(shape) {
   }
   return shape;
 }
+// When the bevel's offset outlines cross (two holes close together, a narrow neck), the triangulator bridges them with
+// slivers that roof over a hole. Probe points just inside every hole must stay uncovered by the flat top; if one is
+// covered, the part is built again without the rounding.
+function capCoversHole(g, shape) {
+  const pos = g.attributes.position, n = pos.count; let zmax = -1e9; for (let i = 0; i < n; i++) zmax = Math.max(zmax, pos.getZ(i));
+  const tris = [];
+  for (let i = 0; i < n; i += 3) if (Math.abs(pos.getZ(i) - zmax) < 1e-4 && Math.abs(pos.getZ(i + 1) - zmax) < 1e-4 && Math.abs(pos.getZ(i + 2) - zmax) < 1e-4)
+    tris.push([pos.getX(i), pos.getY(i), pos.getX(i + 1), pos.getY(i + 1), pos.getX(i + 2), pos.getY(i + 2)]);
+  const inTri = (x, y, t) => { const d1 = (x - t[2]) * (t[1] - t[3]) - (t[0] - t[2]) * (y - t[3]), d2 = (x - t[4]) * (t[3] - t[5]) - (t[2] - t[4]) * (y - t[5]), d3 = (x - t[0]) * (t[5] - t[1]) - (t[4] - t[0]) * (y - t[1]); return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0)); };
+  const { holes } = shape.extractPoints(24);
+  for (const hh of holes) {
+    const ccw = THREE.ShapeUtils.area(hh) > 0, m = hh.length, stepN = Math.max(1, Math.floor(m / 12));
+    for (let i = 0; i < m; i += stepN) {
+      const a = hh[i], b = hh[(i + 1) % m], ex = b.x - a.x, ey = b.y - a.y, L = Math.hypot(ex, ey); if (L < 1e-6) continue;
+      const sgn = ccw ? 1 : -1, px = (a.x + b.x) / 2 - sgn * ey / L * 0.12, py = (a.y + b.y) / 2 + sgn * ex / L * 0.12; // just inside the hole
+      for (const t of tris) if (inTri(px, py, t)) return true;
+    }
+  }
+  return false;
+}
 function slab(shape, h, yBase, mat, name, bevel = 0, inset = 0) {
   shape = safeShape(shape);
   const d = sink(mat, yBase, h); yBase -= d; h += d;
-  const g = new THREE.ExtrudeGeometry(shape, {
-    depth: h - 2 * bevel, steps: 1, curveSegments: 24,
-    bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel, bevelOffset: -bevel - inset, bevelSegments: 4,
+  const make = bv => new THREE.ExtrudeGeometry(shape, {
+    depth: h - 2 * bv, steps: 1, curveSegments: 24,
+    bevelEnabled: bv > 0, bevelThickness: bv, bevelSize: bv, bevelOffset: -bv - (bv > 0 ? inset : 0), bevelSegments: 4,
   });
+  let g = make(bevel);
+  let flat = false;
+  if (bevel > 0 && capCoversHole(g, shape)) { g.dispose(); g = make(0); bevel = 0; flat = true; }
   g.rotateX(Math.PI / 2);
   g.translate(0, yBase + h - bevel, 0);
-  const m = new THREE.Mesh(g, mat); m.name = name; return m;
+  const m = new THREE.Mesh(g, mat); m.name = name; m.userData.flat = flat; return m;
 }
 // slab with a bevel on only the chosen faces: a plain extrusion plus a short beveled cap at each bevelled end.
 // The cap's straight section is inset 0.05 mm and the plain part starts 0.03 mm inside it, so the two closed solids
@@ -231,12 +256,18 @@ function slabB(shape, h, yBase, mat, name, bevTop = 0, bevBot = 0) {
   shape = safeShape(shape);
   const d = bevBot > 0 ? 0 : sink(mat, yBase, h); yBase -= d; h += d;
   const parts = [], ovB = bevBot > 0 ? Math.min(0.6, h - 2 * bevBot) : 0, ovT = bevTop > 0 ? Math.min(0.6, h - 2 * bevTop) : 0;
-  const capB = ovB > 0.1, capT = ovT > 0.1;
+  // a rounded cap whose bevel would roof over a hole comes back flat; it is then left out and the plain part runs the
+  // full height instead, so no two solids share a face
+  let cB = ovB > 0.1 ? slab(shape, 2 * bevBot + ovB, yBase, mat, name, bevBot, 0.05) : null;
+  let cT = ovT > 0.1 ? slab(shape, 2 * bevTop + ovT, yBase + h - 2 * bevTop - ovT, mat, name, bevTop, 0.05) : null;
+  if (cB && cB.userData.flat) { cB.geometry.dispose(); cB = null; }
+  if (cT && cT.userData.flat) { cT.geometry.dispose(); cT = null; }
+  const capB = !!cB, capT = !!cT;
   const y0 = yBase + (capB ? bevBot + 0.03 : 0), y1 = yBase + h - (capT ? bevTop + 0.03 : 0);
   const plain = new THREE.ExtrudeGeometry(shape, { depth: y1 - y0, steps: 1, curveSegments: 24, bevelEnabled: false });
   plain.rotateX(Math.PI / 2); plain.translate(0, y1, 0); parts.push(plain);
-  if (capB) parts.push(slab(shape, 2 * bevBot + ovB, yBase, mat, name, bevBot, 0.05).geometry);
-  if (capT) parts.push(slab(shape, 2 * bevTop + ovT, yBase + h - 2 * bevTop - ovT, mat, name, bevTop, 0.05).geometry);
+  if (capB) parts.push(cB.geometry);
+  if (capT) parts.push(cT.geometry);
   const m = new THREE.Mesh(parts.length > 1 ? mergeGeometries(parts) : parts[0], mat); m.name = name; return m;
 }
 // a hollow cylinder along z, centred on the origin
@@ -505,11 +536,16 @@ function decorate(s) {
   let area = new Uint8Array(reg.length); for (let i = 0; i < area.length; i++) area[i] = dist[i] > bPx ? 1 : 0;
   if (keepOut) area = andM(area, keepOut, true);
   const areaMm = countM(area) * D.res * D.res; if (areaMm < 8) return plain('small');
-  const ink = patternInk(kind, D, area, proc, seed, false);
+  // A drawing that barely fills its space (a vine that found no way along a narrow band, say) is drawn again from a
+  // different start, twice at most, and the fullest one kept; if even that is thin, the fit check says so.
+  const nA = countM(area);
+  let ink = patternInk(kind, D, area, proc, seed, false), cov = countM(ink) / nA;
+  for (let k = 1; k <= 2 && cov < 0.06; k++) { const alt = patternInk(kind, D, area, proc, seed + 101 * k, false), c2 = countM(alt) / nA; if (c2 > cov) { ink = alt; cov = c2; } }
+  const thin = cov < 0.05;
   if (cut === 'relief') {
     s.parts.forEach(plainPart);
     fastShapes(D, ink).forEach(q => group.add(slab(q.shape, S.depth + 0.05, s.yTop - 0.05, mat, pre + 'decor-relief')));
-    return { done: true, cut, areaMm, ring };
+    return { done: true, cut, areaMm, ring, thin };
   }
   // engraved: the parts stop `depth` short of the top, and one top layer — the whole surface less the cuts — finishes it
   // (a part with the usual all-round rounding keeps it, shortened; the top layer reaches down past that rounding so
@@ -520,7 +556,7 @@ function decorate(s) {
   // peg holes and slots at least as open as the parts below them
   const top = andM(erodeM(D, reg, Math.max(0.12, D.res * 1.3)), ink, true);
   fastShapes(D, top).forEach(q => group.add(slab(q.shape, d + under + 0.05, s.yTop - d - under - 0.05, mat, pre + 'decor-top')));
-  return { done: true, cut, areaMm, ring, fallback };
+  return { done: true, cut, areaMm, ring, fallback, thin };
 }
 const rowsCut = (mask, R, zc, keepAbove) => { const py = (zc - R.z0) / RES; const m = new Uint8Array(mask.length); for (let y = 0; y < R.h; y++) { const keep = keepAbove ? y >= py : y < py; if (keep) for (let x = 0; x < R.w; x++) m[y * R.w + x] = mask[y * R.w + x]; } return m; };
 const or = (m1, m2) => { const m = new Uint8Array(m1.length); for (let i = 0; i < m.length; i++) m[i] = m1[i] || m2[i] ? 1 : 0; return m; };
@@ -618,7 +654,8 @@ export function build(P) {
   const pockets = offs.map(dx => contour(R, maskOf(R, shift(bayPrims, dx), clr)));
   const felts = offs.map(dx => contour(R, maskOf(R, shift(bayPrims, dx), clr - 0.2)));
   let pocketMask = maskOf(R, allBay, clr);
-  const harpPocketMask = pocketMask; // the pocket before the slide-back sweep: the harp's real width, row by row
+  // the pocket before the slide-back sweep: the harp's real width, row by row (for the rack, the first bay alone)
+  const harpPocketMask = nb > 1 ? maskOf(R, shift(bayPrims, offs[0]), clr) : pocketMask, bayX = offs[0];
   const pb = bboxOf(pockets.flat());
   const bailEnd = style === 'sleeve' ? 1 : -1;
   const tabX = bailEnd < 0 ? (() => { const end = pockets.flat().filter(p => p.z < pb.minZ + 3); return end.reduce((s, p) => s + p.x, 0) / (end.length || 1); })() : 0;
@@ -641,6 +678,7 @@ export function build(P) {
     pockets[0] = contour(R, pocketMask);
   }
   const pivotOff = 4.25, bossR = 4.6, sides = [], lidT = 3;
+  const padXs = new Map(); // deck turn-buttons: how far along its bar each pad sits (set once the pocket is known)
   const gateOff = 5; // sleeve gate: pivot post just outside the mouth, clear of the channel
   // footprint: the hull of the pockets (the straight channel for the sleeve), offset by clearance + wall, cut at the sleeve mouth
   const footprint = [{ poly: hull(style === 'sleeve' ? chanPrims : allBay) }];
@@ -747,7 +785,7 @@ export function build(P) {
       // rack: captive turn-buttons. The pocket floor is 1.5 mm higher than in the other styles, so the frame's top sits at the
       // deck surface and the bar itself bears on it — no pad hanging below the deck, nothing to sweep through.
       const dMid = deckLayer(), dUp = deckLayer(); sides.forEach(s => { holeAt(dMid, s.x, s.z, chamR); holeAt(dUp, s.x, s.z, pegR + 0.3); });
-      addLayer(dMid, chamH, yC0, 'deck-chamber'); addLayer(dUp, Dlow - yC1, yC1, 'deck', 0.8, 0);
+      addLayer(dMid, chamH, yC0, 'deck-chamber'); addLayer(dUp, Dlow - yC1, yC1, 'deck', 0.5, 0); // a smaller rounding: the bevel widens every hole, and the peg holes sit only 4 mm from the pocket
     } else {
       buildHold(g, holdKind, { P, deckLayer, addLayer, frameTop, Dlow, floorT, xL: pbx.minX, xR: pbx.maxX, zRing, clr, frameT, wall, gap, R, tabX, zEnd: pb.minZ, footprint, outerNoTab, zStep, obNT, pb, lashGroove, LASH });
     }
@@ -784,8 +822,41 @@ export function build(P) {
         if (roofOn) g.add(slabB(roofS, 3, D - 3, mats.body, 'hood-roof', HOOD_EDGE, 0));
       }
     }
+    // Print pose: the pad under each deck turn-button hangs over the empty pocket, so it would start in mid-air. Each
+    // gets a loose post standing on the bed, up through a slot in the pocket floor to one layer under the pad (the
+    // gap a slicer leaves under its own supports). The post touches nothing; push it out from underneath afterwards.
+    const floorPosts = [], winM = style === 'pendant' ? (traced ? erodeOct(maskOf(R, [{ poly: trace.outline }], 0), R, Math.max(0, Math.round((6 - clr - 0.8) / RES))) : maskOf(R, windows, 0.8)) : null;
+    // where each deck turn-button's pad sits along its bar: over the frame bar, and never closer than a print gap and a bit
+    // to the pocket wall anywhere along the pad's length (on an egg-shaped bow the wall curves in toward the pad's ends)
+    if (style !== 'multi') sides.forEach(sd => {
+      if (sd.gate || sd.double) return;
+      const dir = sd.sg > 0 ? -1 : 1, padW = frameT + 1; let need = -1e9;
+      for (let z = sd.z - 3; z <= sd.z + 3; z += RES) {
+        const py = Math.round((z - R.z0) / RES); if (py < 0 || py >= R.h) continue;
+        let edge = null; if (dir > 0) { for (let x = 0; x < R.w; x++) if (pocketMask[py * R.w + x]) { edge = x; break; } } else { for (let x = R.w - 1; x >= 0; x--) if (pocketMask[py * R.w + x]) { edge = x; break; } }
+        if (edge === null) continue;
+        const ex = R.x0 + (edge + (dir > 0 ? 0 : 1)) * RES; // the wall, in mm
+        need = Math.max(need, dir * (ex - sd.x) + gap + 0.3 + padW / 2);
+      }
+      padXs.set(sd, Math.min(pivotOff + clr + frameT + 3 - padW / 2 + 1.5, Math.max(pivotOff + clr + frameT / 2 + 0.7, need))); // and never past the end of the bar
+    });
+    if (P.printPose && style !== 'multi') sides.forEach(sd => {
+      if (sd.gate || sd.double) return;
+      const base = sd.sg > 0 ? Math.PI : 0, cx = sd.x + (padXs.get(sd) - 0.7) * Math.cos(base); // under the pad, over the frame bar
+      // slot half-sizes: inside the bar's footprint, and at least 0.8 mm clear of any window in a pendant's floor
+      const hz = 2.6; let hx = Math.max(0.6, frameT / 2 - 0.3);
+      const hits = w => { const m = maskOf(R, [rect(cx - w, sd.z - hz, cx + w, sd.z + hz)], 0); for (let k = 0; k < m.length; k++) if (m[k] && winM[k]) return true; return false; };
+      if (winM) while (hx >= 0.6 && hits(hx)) hx -= 0.2;
+      if (hx >= 0.6) floorPosts.push({ x: cx, z: sd.z, hx, hz });
+    });
+    const postHoles = floorPosts.map(q => contour(R, maskOf(R, [rect(q.x - q.hx, q.z - q.hz, q.x + q.hx, q.z + q.hz)], 0))); // traced like every other outline, so it winds the same way
+    floorPosts.forEach(q => {
+      const top = frameTop + gap - 0.2, post = new THREE.Mesh(new THREE.BoxGeometry(2 * (q.hx - gap), top, 2 * (q.hz - gap)), mats.body);
+      post.position.set(q.x, top / 2, q.z); post.name = 'support-post'; g.add(post);
+    });
     pockets.forEach((p, i) => {
-      const fS = shapeOf(p), lS = shapeOf(felts[i]), floorName = 'pocket-floor' + (nb > 1 ? '-' + (i + 1) : '');
+      const floorShape = () => { const sh = shapeOf(p); if (i === 0) postHoles.forEach(h => sh.holes.push(pathOf(h))); return sh; };
+      const fS = floorShape(), lS = shapeOf(felts[i]), floorName = 'pocket-floor' + (nb > 1 ? '-' + (i + 1) : '');
       let floorDone = false;
       if (style === 'pendant') {
         // windows under the ring and under the reed only — every bar of the frame stays on solid floor
@@ -794,8 +865,8 @@ export function build(P) {
         if (decoOn && P.cut === 'pierce' && wins.length) {
           // pierced: the windows fill with filigree instead of standing open. The floor prints flat on the bed, so this
           // works on a filament printer as well as in resin.
-          decoNotes.push({ where: 'floor', bed: true, ...decorate({ P, R, group: g, regionShapes: [shapeOf(p)], yTop: floorT + raise, window: maskOf(R, wins.map(w => ({ poly: w })), 0), seedOff: 6 + i,
-            parts: [{ shape: shapeOf(p), h: floorT + raise, y: 0.001, name: floorName, bevel: 0, pierce: true }] }) });
+          decoNotes.push({ where: 'floor', bed: true, ...decorate({ P, R, group: g, regionShapes: [floorShape()], yTop: floorT + raise, window: maskOf(R, wins.map(w => ({ poly: w })), 0), seedOff: 6 + i,
+            parts: [{ shape: floorShape(), h: floorT + raise, y: 0.001, name: floorName, bevel: 0, pierce: true }] }) });
           floorDone = true;
         } else wins.forEach(w => fS.holes.push(pathOf(w)));
       }
@@ -823,7 +894,11 @@ export function build(P) {
       // a deep pad hangs in front of the ring and blocks it from sliding back out
       const padG = yBar - (floorT + feltT + 0.3);
       const pad = new THREE.Mesh(new THREE.BoxGeometry(Math.min(hW * 0.6, 12), padG, 3), mats.accent); pad.position.set(reach, -padG / 2, 0); pad.name = 'gate-pad'; m.add(pad);
-    } else if (style !== 'multi') (s.double ? [1, -1] : [1]).forEach(d => { const padX = (s.double ? webHalf : pivotOff) + clr + frameT / 2 + 0.7; /* pad sits clear of the pocket wall */ const pad = new THREE.Mesh(new THREE.BoxGeometry(frameT + 1, padH, barW - 1), mats.accent); pad.position.set(d * padX, -padH / 2, 0); pad.name = 'button-pad'; m.add(pad); });
+      if (P.printPose) { // the pad hangs past the mouth with only the bed below it: a loose post one layer under it holds it up while printing
+        const top = yBar - padG - 0.2, pw = Math.min(hW * 0.6, 12) - 0.8, post = new THREE.Mesh(new THREE.BoxGeometry(pw, top, 2.2), mats.body);
+        post.position.set(s.x + reach, top / 2, s.z); post.name = 'support-post'; g.add(post);
+      }
+    } else if (style !== 'multi') (s.double ? [1, -1] : [1]).forEach(d => { const padX = s.double ? webHalf + clr + frameT / 2 + 0.7 : padXs.get(s); /* pad sits clear of the pocket wall */ const pad = new THREE.Mesh(new THREE.BoxGeometry(frameT + 1, padH, barW - 1), mats.accent); pad.position.set(d * padX, -padH / 2, 0); pad.name = 'button-pad'; m.add(pad); });
     const yHead = yC0 + gap, pegL = yBar - yHead - headH;
     const peg = new THREE.Mesh(new THREE.CylinderGeometry(pegR, pegR, pegL + 0.2, 32), mats.accent); peg.position.set(0, -pegL / 2 + 0.1, 0); peg.name = 'pivot-peg'; m.add(peg);
     const head = new THREE.Mesh(new THREE.CylinderGeometry(headR, headR, headH, 32), mats.accent); head.position.set(0, -pegL - headH / 2, 0); head.name = 'captive-head'; m.add(head);
@@ -951,7 +1026,7 @@ export function build(P) {
     if (o.isMesh) o.geometry.scale(0.001, 0.001, 0.001);
     if (o.userData && o.userData.slide) { o.userData.base *= 0.001; o.userData.open *= 0.001; }
   });
-  const report = fitReport({ decoNotes, P, style, traced, trace, hb0, pb, zStep, zRoof, slideOut, trigger, tH, frameH, frameT, clr, floorT, feltT, Dlow, D, roofed, zRing, bowB, pocketMask, harpPocketMask, R, zc, holdKind });
+  const report = fitReport({ decoNotes, P, style, traced, trace, hb0, pb, zStep, zRoof, slideOut, trigger, tH, frameH, frameT, clr, floorT, feltT, Dlow, D, roofed, zRing, bowB, pocketMask, harpPocketMask, bayX, R, zc, holdKind });
   return { g, dims: { L: ob.maxZ - ob.minZ, W: ob.maxX - ob.minX, D: style === 'clam' ? D + 3 : D }, report };
 }
 
@@ -1147,7 +1222,7 @@ export function toOBJ(g) {
 // harp out (deck and pendant: lift the bow, slide back until the trigger is out from under the roof, lift away), tested
 // point by point against the pocket, the deck edge and the roof.
 function fitReport(c) {
-  const { P, style, traced, trace, hb0, pb, zStep, zRoof, slideOut, trigger, tH, frameH, frameT, clr, floorT, feltT, Dlow, D, zRing, bowB, pocketMask, harpPocketMask, R, zc, holdKind } = c;
+  const { P, style, traced, trace, hb0, pb, zStep, zRoof, slideOut, trigger, tH, frameH, frameT, clr, floorT, feltT, Dlow, D, zRing, bowB, pocketMask, harpPocketMask, bayX = 0, R, zc, holdKind } = c;
   const checks = [], yF = floorT + feltT + (style === 'multi' ? 1.5 : 0), yRoof = D - 3, zT = hb0.maxZ; // zT: the harp's trigger-end extreme
   const add = (id, ok, level, text, fix) => checks.push({ id, ok, level: ok ? 'ok' : level, text, fix });
   // lengths in the units the page is showing: L(mm, decimals in mm)
@@ -1188,7 +1263,7 @@ function fitReport(c) {
   const holdNote = {
     lash: `The slots are the whole mechanism, and they sit ${U(2, 0)} off the pocket wall so the cord bears on the frame itself. Thread ${inch ? '3/32 to 1/8 in' : '2 to 3 mm'} cord or shock cord up through one, along the groove across the deck, down the other, and tie it under the case. The groove holds the cord below the top of the frame, so pulling it tight clamps the harp down.`,
     slide: 'The cover prints flat beside the case. Slide it in from the open end until it clicks over the bump; slide it back off to get the harp out.',
-    swing: 'Two turn-buttons on captive pegs. A firm quarter-turn frees each one after printing, and it clicks into place on a detent. The pad under each bar hangs over the empty pocket while printing: most printers bridge a pad that small, but if yours sags, paint on supports under the two pads only.',
+    swing: 'Two turn-buttons on captive pegs. A firm quarter-turn frees each one after printing, and it clicks into place on a detent. Each pad under a bar prints on a little loose post that stands on the bed through a slot in the pocket floor; push the two posts out from underneath once it is printed. The felt covers the slots.',
   }[holdKind];
   if (holdNote) add('hold', true, 'info', holdNote);
 
@@ -1208,6 +1283,10 @@ function fitReport(c) {
       if (proc === 'fdm' && pierced.some(n => !n.bed)) add('decor-fdm', false, 'warn', 'Filigree over the open pocket would be printed in mid-air by a filament printer, and the strands would sag. Print this one in resin, or pick the clamshell or the pendant, whose openwork prints face down on the bed.', { proc: 'resin' });
     } else add('decor', true, 'info', `${nm} is ${P.cut === 'engrave' ? `cut ${U(S.depth)} into` : `raised ${U(S.depth)} off`} the ${names(done)}, inside a plain border. Nothing in it is finer than ${U(Math.min(S.line, S.gap), 2)}, sized for ${proc === 'resin' ? 'a resin printer' : 'a 0.4 mm filament nozzle'}.`);
   }
+  if (P.deco && P.deco !== 'none' && notes.some(n => n.done && n.thin)) {
+    const WH2 = { hood: 'hood', roof: 'roof', lid: 'lid', 'lid-roof': 'lid', deck: 'deck', floor: 'floor' };
+    add('decor-thin', false, 'warn', `The pattern only found room for a few strokes on the ${[...new Set(notes.filter(n => n.thin).map(n => WH2[n.where]))].join(' and ')}: the space there is too narrow for it. Try another pattern (Damascus and the waves fill any shape), or widen the wall.`);
+  }
   if (proc === 'resin') {
     const moving = !(holdKind === 'lash' || holdKind === 'slide');
     if (moving) add('resin-gap', (P.gap || 0.4) >= 0.55, 'warn', (P.gap || 0.4) >= 0.55
@@ -1217,33 +1296,32 @@ function fitReport(c) {
 
   // 6. removal path (deck / pendant): tilt about the tips, slide back `slideOut`, lift
   let removal = null;
-  if (roofedStyle && !roofOn) {
+  const slideN = style === 'multi' ? (roofOn ? Math.max(0, hb0.maxZ + clr - zRoof + 1) : 0) : slideOut;
+  if (hooded && !roofOn) {
     removal = { ok: true, liftOnly: true, problems: [] };
-    add('no-roof', true, 'info', 'No roof over the reed tip: only the latches at the bow hold the harp, and the tip end can lift a little. That is fine in a bag or on a cord; put the roof back if the case will ride loose in a pocket.');
-    add('removal', true, 'ok', 'Comes out: latches back, lift it straight out.');
-  } else if (roofedStyle) {
+    add('no-roof', true, 'info', 'No roof over the reed tip: only the ' + (style === 'multi' ? 'buttons' : 'latches') + ' at the bow hold the harp, and the tip end can lift a little. That is fine in a bag or on a cord; put the roof back if the case will ride loose in a pocket.');
+    add('removal', true, 'ok', `Comes out: ${style === 'multi' ? 'turn the buttons' : 'latches back'}, lift it straight out.`);
+  } else if (hooded) {
     const L = zT - zRing, lift = Dlow + 1 - yF, theta = Math.asin(Math.min(1, lift / Math.max(L, 1)));
     const cosT = Math.cos(theta), sinT = Math.sin(theta);
     const pose = (z, y, shift) => ({ z: zT - (zT - z) * cosT - (y - yF) * sinT - shift, y: yF + (y - yF) * cosT + (zT - z) * sinT }); // rotate about (zT, yF) lifting the bow, then slide back
     const problems = [];
     // the trigger top must stay under the roof while it is still under it
-    for (const shift of [0, slideOut * 0.5, slideOut]) { const q = pose(trigger.z + 3, yF + tH, shift); if (q.z >= zRoof - 0.5 && q.y > yRoof - 0.5) problems.push('the trigger hits the roof while tilting'); }
+    for (const shift of [0, slideN * 0.5, slideN]) { const q = pose(trigger.z + 3, yF + tH, shift); if (q.z >= zRoof - 0.5 && q.y > yRoof - 0.5) problems.push('the trigger hits the roof while tilting'); }
     // every point of the harp, at the end of the slide, must be inside the (swept) pocket or above the deck edge
     let blocked = 0, n = 0;
     for (let z = hb0.minZ; z <= zT; z += 1) {
       const hw = halfW(z) - clr; if (hw <= 0) continue;
-      for (const x of [-hw, hw]) { n++; const q = pose(z, yF + frameH, slideOut); const ok = q.z >= zStep ? inPocket(x * 0.98, q.z) || q.y >= D - 0.5 : inPocket(x * 0.98, q.z) || q.y >= Dlow + 0.3; if (!ok) blocked++; }
+      for (const x of [bayX - hw, bayX + hw]) { n++; const q = pose(z, yF + frameH, slideN); const xi = bayX + (x - bayX) * 0.98, ok = q.z >= zStep ? inPocket(xi, q.z) || q.y >= D - 0.5 : inPocket(xi, q.z) || q.y >= Dlow + 0.3; if (!ok) blocked++; }
     }
     if (blocked > n * 0.03) problems.push('the outline is wider behind its tips than the pocket allows, so it cannot slide back out from under the roof');
     const ok = problems.length === 0;
-    removal = { ok, theta, slide: slideOut, lift: D - yF + 12, pivot: { z: zT, y: yF }, problems };
-    add('removal', ok, 'bad', ok ? `Comes out: latches back, lift the bow ${U(lift, 0)}, slide back ${U(slideOut, 0)} to free the trigger, lift away.` : 'The harp cannot be taken out: ' + problems.join('; ') + '.', null);
-  } else if (style === 'multi') {
-    add('removal', true, 'ok', roofOn ? 'Comes out: turn the buttons, lift the bow end, slide the harp back from under the roof and lift it away.' : 'Comes out: turn the buttons and lift it straight out.');
+    removal = { ok, theta, slide: slideN, lift: D - yF + 12, pivot: { z: zT, y: yF }, problems };
+    add('removal', ok, 'bad', ok ? `Comes out: ${style === 'multi' ? 'turn the buttons' : 'latches back'}, lift the bow ${U(lift, 0)}, slide back ${U(slideN, 0)} to free the trigger, lift away.` : 'The harp cannot be taken out: ' + problems.join('; ') + '.', null);
   } else if (style === 'sleeve') {
     removal = { ok: true, slideZ: -(hb0.maxZ - hb0.minZ + 10), problems: [] };
     add('removal', true, 'ok', 'Comes out: swing the gate open and slide the harp out of the mouth.');
-    add('gate-pad', true, 'info', 'The pad that hangs down from the gate bar starts in mid-air while printing. If your printer sags it, paint on supports under that pad only.');
+    add('gate-pad', true, 'info', 'The pad hanging from the gate bar prints on a loose post standing on the bed just past the mouth. Pick the post off once it is printed.');
   } else if (style === 'clam') {
     removal = { ok: true, liftOnly: true, problems: [] };
     add('removal', true, 'ok', 'Comes out: slide the bolt back, open the lid, lift the harp straight up.');

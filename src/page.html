@@ -196,6 +196,7 @@ footer{padding:16px clamp(16px,3vw,32px) 28px;font-family:var(--mono);font-size:
 #tbar .thint{font-size:13.5px;color:var(--muted);flex:1;min-width:240px;max-width:70ch}
 #tbar .dist{display:flex;align-items:center;gap:8px;font-size:13px}
 #tbar .dist input{width:70px}
+#t-meas{margin-left:6px;color:var(--muted);font-family:var(--mono);font-size:12px}
 #tcanvas{flex:1;cursor:crosshair;touch-action:none;display:block}
 #boot{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:30;max-width:min(92vw,560px);padding:10px 16px;border-radius:8px;background:var(--surface);color:var(--ink);border:1px solid var(--line-strong);box-shadow:var(--shadow);font-size:13.5px;line-height:1.4;text-align:center}
 #boot.err{border-color:var(--bad);color:var(--bad)}
@@ -379,7 +380,7 @@ summary{color:var(--ink);text-transform:uppercase;letter-spacing:.06em;font-size
     <span class="tstep" id="t-step"></span>
     <span class="thint" id="t-hint"></span>
     <span id="t-detect"><button id="t-alt" class="btn" type="button">Try another outline</button></span>
-    <label class="dist" id="t-scale-wrap">Harp length <input id="t-dist" class="text" type="number" step="0.05" value="4"> <span class="u-len">in</span></label>
+    <label class="dist" id="t-scale-wrap">Harp length <input id="t-dist" class="text" type="number" step="0.05" value="4"> <span class="u-len">in</span> <span id="t-meas" class="sub" aria-live="polite"></span></label>
     <button id="t-swap" class="btn" type="button" hidden>Swap ends</button>
     <button id="t-hand" class="btn ghost" type="button">Trace by hand</button>
     <button id="t-undo" class="btn ghost" type="button">Undo</button>

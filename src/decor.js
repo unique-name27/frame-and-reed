@@ -107,7 +107,16 @@ function principal(D, area) {
 function drawStrokes(ctx, strokes) {
   ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#000'; ctx.fillStyle = '#000';
   for (const s of strokes) {
-    if (s.poly) { ctx.beginPath(); s.poly.forEach((p, i) => i ? ctx.lineTo(p.x, p.z) : ctx.moveTo(p.x, p.z)); ctx.closePath(); ctx.fill(); continue; }
+    if (s.poly) {
+      ctx.beginPath(); s.poly.forEach((p, i) => i ? ctx.lineTo(p.x, p.z) : ctx.moveTo(p.x, p.z)); ctx.closePath(); ctx.fill();
+      if (s.vein) { // the midrib, from a little way in to short of the tip, so the leaf stays in one piece
+        ctx.globalCompositeOperation = 'destination-out'; ctx.lineWidth = s.vein.w; ctx.beginPath();
+        const m = s.vein.mid, a = Math.floor(m.length * 0.22), b = Math.floor(m.length * 0.72);
+        for (let i = a; i <= b; i++) i === a ? ctx.moveTo(m[i].x, m[i].z) : ctx.lineTo(m[i].x, m[i].z);
+        ctx.stroke(); ctx.globalCompositeOperation = 'source-over';
+      }
+      continue;
+    }
     if (s.dot) { ctx.beginPath(); ctx.arc(s.dot.x, s.dot.z, s.dot.r, 0, Math.PI * 2); ctx.fill(); continue; }
     const L = s.line; if (L.length < 2) continue;
     for (let i = 1; i < L.length; i++) { ctx.lineWidth = 2 * L[i].r; ctx.beginPath(); ctx.moveTo(L[i - 1].x, L[i - 1].z); ctx.lineTo(L[i].x, L[i].z); ctx.stroke(); }
@@ -172,7 +181,8 @@ function vineSpace(D, area, o) {
     const sid = sidN++, ign = new Set([parentSid]);
     for (let i = 3; i < L.mid.length; i++) { const m = L.mid[i]; if (!free(m.x, m.z, Math.max(m.r, 0.3), sid, i, 99, ign)) return false; }
     L.mid.forEach((m, i) => add(m.x, m.z, Math.max(m.r, 0.2), sid, i, 'leaf'));
-    strokes.push({ poly: L.poly });
+    const vw = o.gap ? o.gap * 0.75 : 0, halves = (wd - vw) / 2; // a vein only where both halves stay wider than the printer's finest line
+    strokes.push(vw && halves >= (o.minW || 0.5) * 1.15 ? { poly: L.poly, vein: { mid: L.mid, w: vw } } : { poly: L.poly });
     return true;
   }
   return { T, grid, strokes, grow, leaf, add, free, newSid: () => sidN++ };
@@ -187,7 +197,7 @@ export function damascus(D, area, o) {
   const drops = [], nDrops = Math.max(0, Math.round(mm2 / 260 * (o.drops ?? 1)));
   for (let k = 0, tries = 0; k < nDrops && tries < 400; tries++) {
     const p = T.at(T.idx[Math.floor(R() * T.idx.length)]); if (!p) break;
-    const rad = per * (2.5 + 2 * R()); if (T.dmm(p.x, p.z) < rad * 0.6 || drops.some(q => Math.hypot(q.x - p.x, q.z - p.z) < q.rad + rad + 2 * per)) continue;
+    const rad = per * (2.6 + 2 * R()); if (T.dmm(p.x, p.z) < rad * 0.6 || drops.some(q => Math.hypot(q.x - p.x, q.z - p.z) < q.rad + rad + 2 * per)) continue;
     drops.push({ x: p.x, z: p.z, rad, ph: R() }); k++;
   }
   const ink = new Uint8Array(w * h), duty = o.duty ?? 0.5;
@@ -198,12 +208,18 @@ export function damascus(D, area, o) {
     let X = D.x0 + (x + 0.5) * D.res, Z = D.z0 + (y + 0.5) * D.res;
     const wx = 3.2 * n1(X / 15, Z / 15) + 0.9 * n2(X / 5 + 17, Z / 5), wz = 3.2 * n1(X / 15 + 53, Z / 15 + 29) + 0.9 * n2(X / 5 + 71, Z / 5 + 3);
     let v = ((X + wx) * c + (Z + wz) * s) / per;
+    // a raindrop: the billet was drilled and ground flat, so the layers turn into rings there. The rings take over
+    // gradually across about one layer, bent by the same noise as the layers, so each drop sits in the steel
+    // rather than on top of it
     for (const q of drops) {
       const dx = X - q.x, dz = Z - q.z, reach = q.rad + per; if (dx >= reach || dx <= -reach || dz >= reach || dz <= -reach) continue;
-      const r = Math.hypot(dx, dz);
-      if (r < reach) { const t = Math.min(1, Math.max(0, (q.rad - r) / (0.7 * per))); v = v * (1 - t) + (r / per + q.ph) * t; }
+      const r = Math.hypot(dx + 0.35 * wx, dz + 0.35 * wz); if (r >= reach) continue;
+      const t = Math.min(1, Math.max(0, (q.rad - r) / (1.1 * per))), w = t * t * (3 - 2 * t);
+      v = v * (1 - w) + (r / per + q.ph) * w;
     }
-    if (v - Math.floor(v) < duty) ink[i] = 1;
+    // the layers are not all equally thick in forged steel; keep the swing small so every line still prints
+    const dl = Math.min(0.6, Math.max(0.4, duty + 0.07 * n2(X / 9 + 5, Z / 9 + 9)));
+    if (v - Math.floor(v) < dl) ink[i] = 1;
   }
   return ink;
 }
@@ -368,12 +384,27 @@ export function flowers(D, area, o) {
   const fits = (x, z, rad) => T.dmm(x, z) >= rad * 0.92 + o.edge && V.free(x, z, rad * 0.88, -1, 0, 0, null);
   // a curved stalk from p to the blossom's edge, registered so later pieces keep clear of it
   const stalk = (p, cx, cz, rad) => {
-    const th = Math.atan2(cz - p.z, cx - p.x), L = Math.hypot(cx - p.x, cz - p.z) - rad * 0.55, bend = (R() - 0.5) * 0.5 * L;
+    const th = Math.atan2(cz - p.z, cx - p.x), L = Math.hypot(cx - p.x, cz - p.z) - rad * 0.55, bend = (R() < 0.5 ? -1 : 1) * (0.18 + 0.2 * R()) * L;
     const P1 = { x: p.x + Math.cos(th) * L, z: p.z + Math.sin(th) * L }, C = { x: (p.x + P1.x) / 2 - Math.sin(th) * bend, z: (p.z + P1.z) / 2 + Math.cos(th) * bend };
     const n = Math.max(4, Math.ceil(L / 0.25)), line = [], sid = V.newSid(), r = Math.max(o.minW / 2, o.stem / 2 * 0.85);
     for (let i = 0; i <= n; i++) { const t = i / n, u = 1 - t, x = u * u * p.x + 2 * u * t * C.x + t * t * P1.x, z = u * u * p.z + 2 * u * t * C.z + t * t * P1.z; line.push({ x, z, r, th }); if (i > 3) V.add(x, z, r, sid, i); }
     for (let i = 1; i < line.length; i++) line[i].th = Math.atan2(line[i].z - line[i - 1].z, line[i].x - line[i - 1].x);
-    V.strokes.push({ line }); twigs.push(line); return line;
+    V.strokes.push({ line }); twigs.push(line);
+    // a leaf part-way up a longer stalk, on the outside of its bend
+    if (L > o.leaf * 0.9 && R() < 0.65) { const q = line[Math.floor(line.length * (0.35 + 0.2 * R()))], sd = bend > 0 ? -1 : 1; V.leaf(q.x, q.z, q.th + sd * 0.75, o.leaf * (0.6 + 0.2 * R()), o.leaf * 0.36, sid, 0.12 * sd); }
+    return line;
+  };
+  // a bud: a closed flower, an almond on a short stalk with two little sepals; used where a flower will not fit
+  const buds = [];
+  const budAt = (p, dir) => {
+    const bl = Math.max(o.minBloom * 1.3, o.R * 0.9), bw = Math.max(o.minW * 1.6, bl * 0.55);
+    for (const dk of [1.0, 1.4, 0.8]) {
+      const cx = p.x + Math.cos(dir) * bl * dk, cz = p.z + Math.sin(dir) * bl * dk;
+      if (!fits(cx, cz, bl * 0.62)) continue;
+      const l = stalk(p, cx - Math.cos(dir) * bl * 0.3, cz - Math.sin(dir) * bl * 0.3, bl * 0.1), e = l[l.length - 1];
+      V.add(cx, cz, bl * 0.6, V.newSid(), 0, 'blob'); buds.push({ x: e.x, z: e.z, th: e.th, len: bl, wd: bw }); return true;
+    }
+    return false;
   };
   const bloom = (x, z, th, rad) => { V.add(x, z, rad, V.newSid(), 0, 'blob'); blossoms.push({ x, z, rad, th, n: o.daisy && R() < 0.35 ? 9 + Math.floor(R() * 3) : 5 }); };
   // a flower off the stem at p, toward direction dir: nearer and smaller until one fits
@@ -389,18 +420,28 @@ export function flowers(D, area, o) {
   const Lm = main.line, every = Math.max(10, Math.round(lam / 4 / 0.25));
   for (let j = Math.round(every * 0.6); j < Lm.length - 4; j += every) {
     const p = Lm[j], side = room(p, 1) >= room(p, -1) ? 1 : -1;
-    const ok = flowerAt(p)(p.th + side * (0.9 + 0.4 * R())) || flowerAt(p)(p.th - side * (0.9 + 0.4 * R()));
+    const ok = flowerAt(p)(p.th + side * (0.9 + 0.4 * R())) || flowerAt(p)(p.th - side * (0.9 + 0.4 * R())) || budAt(p, p.th + side * 1.0);
     if (!ok) V.leaf(p.x, p.z, p.th + side * 0.8, o.leaf * (0.85 + 0.25 * R()), o.leaf * 0.4, main.sid, 0.14 * side);
     else if (R() < 0.7) V.leaf(p.x, p.z, p.th - side * 0.8, o.leaf * 0.8, o.leaf * 0.36, main.sid, -0.14 * side);
   }
   // the biggest gaps left: a flower right in the middle, on a stalk back to the nearest stem
   fillVoids(D, area, V, o.minBloom * 0.95, (np, tx, tz, clear, dist) => {
     const rad = Math.min(o.R * 1.15, clear * 0.95, (clear - o.sep) / 0.88 - 0.05); // fits() needs 0.88·rad + sep of room
-    if (rad >= o.minBloom && fits(tx, tz, rad)) { const l = stalk(np, tx, tz, rad); bloom(tx, tz, l[l.length - 1].th, rad); return true; }
+    if (rad >= o.minBloom && fits(tx, tz, rad)) {
+      // off the rim, a flower floats free instead of standing on a straight stick; pierced work needs the stalk to stay attached
+      if (np.rim && !o.pierce) { const r2 = Math.max(o.minBloom, rad * 0.85); bloom(tx, tz, R() * Math.PI * 2, r2); return true; } // a little smaller, so it stands apart from its neighbours
+      const l = stalk(np, tx, tz, rad); bloom(tx, tz, l[l.length - 1].th, rad); return true;
+    }
+    if (!np.rim && budAt(np, Math.atan2(tz - np.z, tx - np.x))) return true;
     return !np.rim && V.leaf(np.x, np.z, Math.atan2(tz - np.z, tx - np.x), Math.min(o.leaf, dist + clear * 0.7), o.leaf * 0.4, np.sid, 0.1); // no stray leaves stuck on the rim
   });
   clearD(D); mmSpace(D); drawStrokes(D.ctx, V.strokes);
   for (const b of blossoms) drawBlossom(D.ctx, b, o);
+  for (const b of buds) { // the bud, then its sepals as two short strokes either side of its base
+    const L = leafPoly(b.x, b.z, b.th, b.len, b.wd, 0); D.ctx.beginPath(); L.poly.forEach((q, i) => i ? D.ctx.lineTo(q.x, q.z) : D.ctx.moveTo(q.x, q.z)); D.ctx.closePath(); D.ctx.fill();
+    D.ctx.lineCap = 'round'; D.ctx.lineWidth = Math.max(o.minW, b.wd * 0.28);
+    for (const sd of [1, -1]) { const a = b.th + sd * 0.6, l = b.len * 0.45; D.ctx.beginPath(); D.ctx.moveTo(b.x, b.z); D.ctx.lineTo(b.x + Math.cos(a) * l, b.z + Math.sin(a) * l); D.ctx.stroke(); }
+  }
   // stalks are drawn again over the blossoms' cuts, so each flower stays joined to its stem
   D.ctx.lineCap = 'round'; for (const L of twigs) for (let i = Math.max(1, L.length - 6); i < L.length; i++) { D.ctx.lineWidth = 2 * L[i].r; D.ctx.beginPath(); D.ctx.moveTo(L[i - 1].x, L[i - 1].z); D.ctx.lineTo(L[i].x, L[i].z); D.ctx.stroke(); }
   pxSpace(D);
@@ -443,8 +484,8 @@ export function seigaiha(D, area, o) {
 
 // sizes by printing process: what a 0.4 mm FDM nozzle can hold, and what an MSLA resin printer can
 export const DECO = {
-  fdm:   { line: 1.0, gap: 0.9, period: 2.2, R: 3.4, minBloom: 2.5, leaf: 4.6, stem: 1.1, minW: 0.85, sep: 0.9, ring: 2.4, depth: 0.6, clean: 0.35, rings: 3, daisy: false },
-  resin: { line: 0.55, gap: 0.5, period: 1.3, R: 2.9, minBloom: 1.5, leaf: 3.3, stem: 0.7, minW: 0.5, sep: 0.55, ring: 2.0, depth: 0.6, clean: 0.2, rings: 4, daisy: true },
+  fdm:   { line: 1.0, gap: 0.9, period: 2.2, R: 3.4, minBloom: 2.5, leaf: 5.8, stem: 1.1, minW: 0.85, sep: 0.9, ring: 2.4, depth: 0.6, clean: 0.35, rings: 3, daisy: false },
+  resin: { line: 0.55, gap: 0.5, period: 1.3, R: 2.9, minBloom: 1.5, leaf: 4.4, stem: 0.7, minW: 0.5, sep: 0.55, ring: 2.0, depth: 0.6, clean: 0.2, rings: 4, daisy: true },
 };
 export const PATTERNS = ['damascus', 'scroll', 'flowers', 'seigaiha'];
 // draw the ink for a pattern inside `area`
@@ -452,7 +493,7 @@ export function patternInk(kind, D, area, proc, seed, pierce) {
   const S = DECO[proc] || DECO.fdm, k = pierce ? 1.3 : 1;
   let ink;
   if (kind === 'damascus') ink = damascus(D, area, { seed, period: S.period * (pierce ? 1.35 : 1), duty: pierce ? 0.55 : 0.5, drops: pierce ? 0 : 1 }); // a raindrop's rings are islands: pierced, they would fall out
-  else if (kind === 'scroll') ink = scrollwork(D, area, { seed, stem: S.stem * k, minW: S.minW * k, leaf: S.leaf, sep: S.sep * (pierce ? 1.2 : 1), edge: pierce ? -0.2 : 0.15, maxR: S.leaf * 0.3 + S.stem });
+  else if (kind === 'scroll') ink = scrollwork(D, area, { seed, gap: S.gap, stem: S.stem * k, minW: S.minW * k, leaf: S.leaf, sep: S.sep * (pierce ? 1.2 : 1), edge: pierce ? -0.2 : 0.15, maxR: S.leaf * 0.3 + S.stem });
   else if (kind === 'flowers') ink = flowers(D, area, { seed, R: S.R, gap: S.gap * (pierce ? 1.15 : 1), stem: S.stem * k, minW: S.minW * k, leaf: S.leaf * 0.85, sep: S.sep * (pierce ? 1.2 : 1), edge: pierce ? -0.2 : 0.15, maxR: S.leaf * 0.3 + S.stem, pierce, clean: S.clean * (pierce ? 1.2 : 1), daisy: S.daisy, minBloom: S.minBloom * (pierce ? 1.15 : 1) });
   else if (kind === 'seigaiha') ink = seigaiha(D, area, { seed, line: S.line * k, gap: S.gap * (pierce ? 1.15 : 1), rings: S.rings, R: S.R * 1.25, minW: S.minW * k, pierce, clean: S.clean * (pierce ? 1.2 : 1) });
   else return new Uint8Array(D.w * D.h);

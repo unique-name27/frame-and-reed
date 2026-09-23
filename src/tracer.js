@@ -149,7 +149,20 @@ function syncBar() {
 }
 const toImg = e => { const r = tc.getBoundingClientRect(); return [((e.clientX - r.left) * devicePixelRatio - view.ox) / view.s, ((e.clientY - r.top) * devicePixelRatio - view.oy) / view.s]; };
 const toCv = p => [p[0] * view.s + view.ox, p[1] * view.s + view.oy];
+function measureNote() {
+  const el = $('t-meas'); if (!el) return;
+  const len = +$('t-dist').value, ok = T.scale.length === 2 && len > 0 && T.outline.length >= 3;
+  if (!ok) { el.textContent = ''; return; }
+  const [a, b] = T.scale, px = Math.hypot(b[0] - a[0], b[1] - a[1]); if (px < 1) { el.textContent = ''; return; }
+  const k = len / px, u = [(b[0] - a[0]) / px, (b[1] - a[1]) / px];
+  let lo = 1e9, hi = -1e9, wMax = 0;
+  for (const p of T.outline) { const x = (p[0] - a[0]) * -u[1] + (p[1] - a[1]) * u[0], z = (p[0] - a[0]) * u[0] + (p[1] - a[1]) * u[1]; lo = Math.min(lo, z); hi = Math.max(hi, z); wMax = Math.max(wMax, Math.abs(x)); }
+  let wid; if (T.mode === 'hand') wid = 2 * wMax; else { let l2 = 1e9, h2 = -1e9; for (const p of T.outline) { const x = (p[0] - a[0]) * -u[1] + (p[1] - a[1]) * u[0]; l2 = Math.min(l2, x); h2 = Math.max(h2, x); } wid = h2 - l2; }
+  const unit = state.units === 'mm' ? 'mm' : 'in', f = v => unit === 'mm' ? (v * k).toFixed(0) : (v * k).toFixed(2);
+  el.textContent = `Outline measures ${f(hi - lo)} × ${f(wid)} ${unit}`;
+}
 function drawTracer() {
+  measureNote();
   tctx.clearRect(0, 0, tc.width, tc.height);
   tctx.drawImage(T.img, view.ox, view.oy, T.img.width * view.s, T.img.height * view.s);
   const css = getComputedStyle(document.body), acc = css.getPropertyValue('--accent').trim() || '#1d4e89', axis = '#d6006c', dpr = devicePixelRatio;
@@ -162,7 +175,7 @@ function drawTracer() {
     if (editingOutline) T.outline.forEach(p => dot(p, acc, T.mode === 'auto' ? 3.5 : 5));
     if (T.mode === 'hand' && T.scale.length === 2) { tctx.globalAlpha = 0.55; path(T.outline.map(mirrorPx)); tctx.globalAlpha = 1; }
   }
-  if (T.scale.length) { tctx.strokeStyle = axis; tctx.setLineDash([8 * dpr, 6 * dpr]); path(T.scale); tctx.setLineDash([]); T.scale.forEach((p, i) => dot(p, axis, 6)); if (T.scale.length === 2) { tctx.font = `bold ${13 * dpr}px system-ui`; tctx.fillStyle = axis; const [x, y] = toCv(T.scale[0]); tctx.fillText('TIPS / trigger end', x + 10 * dpr, y - 8 * dpr); const [x2, y2] = toCv(T.scale[1]); tctx.fillText('BOW', x2 + 10 * dpr, y2 - 8 * dpr); } }
+  if (T.scale.length) { tctx.strokeStyle = axis; tctx.setLineDash([8 * dpr, 6 * dpr]); path(T.scale); tctx.setLineDash([]); T.scale.forEach((p, i) => dot(p, axis, 6)); if (T.scale.length === 2) { tctx.font = `bold ${13 * dpr}px system-ui`; tctx.fillStyle = axis; const label = (txt, [x, y]) => { const w = tctx.measureText(txt).width, lx = Math.min(Math.max(4 * dpr, x + 10 * dpr), tc.width - w - 4 * dpr), ly = Math.min(Math.max(16 * dpr, y - 8 * dpr), tc.height - 6 * dpr); tctx.fillText(txt, lx, ly); }; label('TIPS / trigger end', toCv(T.scale[0])); label('BOW', toCv(T.scale[1])); } }
   T.trig.forEach(p => dot(p, '#201e1d'));
 }
 function mirrorPx(p) {
@@ -179,25 +192,46 @@ function nearSegment(e) {
   for (let i = 0; i < segs; i++) { const a = toCv(T.outline[i]), b = toCv(T.outline[(i + 1) % n]), dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy || 1; let t = ((cx - a[0]) * dx + (cy - a[1]) * dy) / L; t = Math.max(0, Math.min(1, t)); const d = Math.hypot(a[0] + t * dx - cx, a[1] + t * dy - cy); if (d < bd) { bd = d; best = i + 1; } }
   return best;
 }
+const touches = new Map(), capture = e => { try { tc.setPointerCapture(e.pointerId); } catch (err) { /* the pointer is already gone */ } };
+const pinchState = () => { const [a, b] = [...touches.values()]; return { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 }; };
 tc.addEventListener('pointerdown', e => {
-  if (e.button === 1 || e.button === 2 || e.altKey || e.shiftKey) { drag = { pan: true, x: e.clientX, y: e.clientY }; tc.setPointerCapture(e.pointerId); return; }
+  if (e.pointerType === 'touch') {
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size === 2) { // a second finger: whatever the first one started becomes a pinch instead
+      if (drag && drag.created) { list().splice(drag.i, 1); }
+      const r = tc.getBoundingClientRect(), st = pinchState();
+      drag = { pinch: true, d0: Math.max(10, st.d), s0: view.s, ox0: view.ox, oy0: view.oy, mx0: (st.mx - r.left) * devicePixelRatio, my0: (st.my - r.top) * devicePixelRatio };
+      capture(e); drawTracer(); return;
+    }
+    if (touches.size > 2) return;
+  }
+  if (e.button === 1 || e.button === 2 || e.altKey || e.shiftKey) { drag = { pan: true, x: e.clientX, y: e.clientY }; capture(e); return; }
   const p = toImg(e), L = list(), hit = nearPoint(e);
   if (hit !== null) drag = { i: hit };
-  else { const seg = nearSegment(e); if (seg !== null) { L.splice(seg, 0, p); drag = { i: seg }; }
-  else if (L === T.scale) { if (T.scale.length < 2) { T.scale.push(p); drag = { i: T.scale.length - 1 }; } }
-  else if (L === T.outline && T.mode === 'hand') { T.outline.push(p); drag = { i: T.outline.length - 1 }; }
+  else { const seg = nearSegment(e); if (seg !== null) { L.splice(seg, 0, p); drag = { i: seg, created: true }; }
+  else if (L === T.scale) { if (T.scale.length < 2) { T.scale.push(p); drag = { i: T.scale.length - 1, created: true }; } }
+  else if (L === T.outline && T.mode === 'hand') { T.outline.push(p); drag = { i: T.outline.length - 1, created: true }; }
   else if (L === T.trig) { T.trig = [p]; drag = { i: 0 }; } }
-  if (drag) tc.setPointerCapture(e.pointerId);
+  if (drag) capture(e);
   drawTracer();
 });
 tc.addEventListener('pointermove', e => {
+  if (e.pointerType === 'touch' && touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (!drag) { tc.style.cursor = nearPoint(e) !== null ? 'grab' : 'crosshair'; return; }
+  if (drag.pinch) {
+    if (touches.size < 2) return;
+    const r = tc.getBoundingClientRect(), st = pinchState(), mx = (st.mx - r.left) * devicePixelRatio, my = (st.my - r.top) * devicePixelRatio;
+    const s1 = Math.min(Math.max(drag.s0 * st.d / drag.d0, 0.05), 40), k = s1 / drag.s0;
+    view.s = s1; view.ox = mx - (drag.mx0 - drag.ox0) * k; view.oy = my - (drag.my0 - drag.oy0) * k; // the photo point under the fingers stays under them
+    drawTracer(); return;
+  }
   if (drag.pan) { view.ox += (e.clientX - drag.x) * devicePixelRatio; view.oy += (e.clientY - drag.y) * devicePixelRatio; drag.x = e.clientX; drag.y = e.clientY; }
   else list()[drag.i] = toImg(e);
   drawTracer();
 });
-tc.addEventListener('pointerup', () => { drag = null; });
-tc.addEventListener('pointercancel', () => { drag = null; });
+const lift = e => { touches.delete(e.pointerId); if (!drag || !drag.pinch || touches.size === 0) drag = null; };
+tc.addEventListener('pointerup', lift);
+tc.addEventListener('pointercancel', lift);
 tc.addEventListener('contextmenu', e => e.preventDefault());
 tc.addEventListener('wheel', e => {
   e.preventDefault();
@@ -274,3 +308,4 @@ function finishHand() {
 }
 export function lastImage() { return T.img ? T.img.src : null; }
 window.__tracer = T;
+$('t-dist').addEventListener('input', measureNote);

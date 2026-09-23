@@ -9,7 +9,7 @@ let view = { s: 1, ox: 0, oy: 0 }, drag = null, onDone = null;
 
 const STEPS = {
   auto: [
-    ['1 · Outline', 'The harp’s edge, found from the photo. Drag a point to fix it, click on the line to add one, or move the threshold. If the wrong thing is outlined, flip “harp is lighter” or trace by hand.'],
+    ['1 · Outline', 'The harp’s edge, found from the photo. Drag a point to fix it, or click on the line to add one. If the wrong thing is outlined, press Try another outline, or trace it by hand.'],
     ['2 · Ends and length', 'Check the labels: the trigger end must say TIPS and the ring end BOW — press Swap ends if they are the wrong way round. Drag the dots if they are off the ends, then type the harp’s overall length.'],
   ],
   hand: [
@@ -109,16 +109,30 @@ function detect() {
 }
 
 // ---- overlay ----
-export function openTracer(src, done) {
+let returnFocus = null;
+export function openTracer(src, done, fail) {
   onDone = done;
   const img = new Image();
   img.onload = () => {
+    if (!img.width || !img.height) { img.onerror(); return; }
+    // a new photo replaces the last one: let go of the old upload's memory
+    if (T.img && T.img.src !== src && T.img.src.startsWith('blob:')) URL.revokeObjectURL(T.img.src);
     T.img = img; T.mode = 'auto'; T.step = 0; T.scale = []; T.outline = []; T.trig = [];
-    tracer.hidden = false; fitTracer();
+    showTracer(true); fitTracer();
     analyse(img); detect(); syncBar(); drawTracer();
+  };
+  img.onerror = () => {
+    if (src.startsWith('blob:')) URL.revokeObjectURL(src);
+    if (fail) fail('That file could not be opened as a picture. Use a JPEG or PNG photo (on an iPhone, set the camera to Most Compatible, or share the photo as JPEG).');
   };
   img.src = src;
 }
+// the overlay is a modal dialog: focus moves in, the page behind can't be reached, Escape closes it
+function showTracer(on) {
+  if (on) { returnFocus = document.activeElement; tracer.hidden = false; document.querySelectorAll('body > :not(#tracer):not(#boot):not(script)').forEach(el => el.inert = true); setTimeout(() => $('t-next').focus(), 0); }
+  else { tracer.hidden = true; document.querySelectorAll('[inert]').forEach(el => el.inert = false); if (returnFocus && returnFocus.focus) returnFocus.focus(); returnFocus = null; drag = null; }
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !tracer.hidden) showTracer(false); });
 function fitTracer() {
   tc.width = tc.clientWidth * devicePixelRatio; tc.height = tc.clientHeight * devicePixelRatio;
   const s = Math.min(tc.width / T.img.width, tc.height / T.img.height) * 0.94;
@@ -183,6 +197,7 @@ tc.addEventListener('pointermove', e => {
   drawTracer();
 });
 tc.addEventListener('pointerup', () => { drag = null; });
+tc.addEventListener('pointercancel', () => { drag = null; });
 tc.addEventListener('contextmenu', e => e.preventDefault());
 tc.addEventListener('wheel', e => {
   e.preventDefault();
@@ -195,13 +210,13 @@ $('t-alt').addEventListener('click', () => { if (T.det) { T.det.pick++; detect()
 $('t-swap').addEventListener('click', () => { if (T.scale.length === 2) { T.scale.reverse(); drawTracer(); } });
 $('t-hand').addEventListener('click', () => { T.mode = 'hand'; T.step = 0; T.scale = []; T.outline = []; T.trig = []; syncBar(); drawTracer(); });
 $('t-undo').addEventListener('click', () => { const L = list(); if (L === T.outline && T.mode === 'auto') { detect(); } else L.pop(); drawTracer(); });
-$('t-cancel').addEventListener('click', () => { tracer.hidden = true; });
+$('t-cancel').addEventListener('click', () => showTracer(false));
 $('t-next').addEventListener('click', () => {
   if (T.mode === 'auto') {
-    if (T.step === 0) { if (T.outline.length < 8) { flashHint('No outline yet — move the threshold, flip “harp is lighter”, or trace by hand.'); return; } T.step = 1; }
-    else { if (T.scale.length < 2 || !(+$('t-dist').value > 0)) { flashHint('Place both ends and give the length.'); return; } finishAuto(); return; }
+    if (T.step === 0) { if (T.outline.length < 8) { flashHint('No outline yet — press Try another outline, or trace it by hand.'); return; } T.step = 1; }
+    else { if (T.scale.length < 2 || !(+$('t-dist').value > 0)) { flashHint('Place both ends and give the length.'); return; } if (!scaleOk()) return; finishAuto(); return; }
   } else {
-    if (T.step === 0) { if (T.scale.length < 2 || !(+$('t-dist').value > 0)) { flashHint('Click both ends of the harp first, and give the length.'); return; } T.step = 1; }
+    if (T.step === 0) { if (T.scale.length < 2 || !(+$('t-dist').value > 0)) { flashHint('Click both ends of the harp first, and give the length.'); return; } if (!scaleOk()) return; T.step = 1; }
     else if (T.step === 1) { if (T.outline.length < 5) { flashHint('Trace at least five points along one side.'); return; } T.step = 2; }
     else { if (!T.trig.length) { flashHint('Click where the trigger bends up.'); return; } finishHand(); return; }
   }
@@ -210,6 +225,13 @@ $('t-next').addEventListener('click', () => {
 function flashHint(msg) { const h = $('t-hint'); const old = h.textContent; h.textContent = msg; h.style.color = 'var(--accent)'; setTimeout(() => { h.style.color = ''; if (h.textContent === msg) h.textContent = old; }, 2600); }
 window.addEventListener('resize', () => { if (!tracer.hidden) { fitTracer(); drawTracer(); } });
 
+// the two ends must be well apart on the photo, and the typed length has to be a harp's (about 1.2 to 10 inches)
+function scaleOk() {
+  const [a, b] = T.scale, px = Math.hypot(b[0] - a[0], b[1] - a[1]), mm = +$('t-dist').value * (state.units === 'mm' ? 1 : IN);
+  if (px < Math.max(T.img.width, T.img.height) * 0.05) { flashHint('The two ends are almost on top of each other. Drag them out to the two ends of the harp.'); return false; }
+  if (mm < 30 || mm > 250) { flashHint(`A harp length of ${$('t-dist').value} ${state.units === 'mm' ? 'mm' : 'in'} is outside what the case builder handles (30–250 mm, about 1.2–10 in). Check the number and the mm / inches switch.`); return false; }
+  return true;
+}
 // ---- finish: photo px → mm in (across, along) axis coordinates ----
 function axisMap() {
   const [a, b] = T.scale, pxLen = Math.hypot(b[0] - a[0], b[1] - a[1]), k = (+$('t-dist').value * (state.units === 'mm' ? 1 : IN)) / pxLen; // the length box is in the page's units
@@ -219,7 +241,7 @@ function axisMap() {
 function commit(outline, trigger) {
   const bb = bboxOf(outline), mz = (bb.minZ + bb.maxZ) / 2, mx = (bb.minX + bb.maxX) / 2;
   state.trace = { outline: outline.map(p => ({ x: p.x - mx, z: p.z - mz })), trigger: { x: 0, z: trigger.z - mz } };
-  tracer.hidden = true;
+  showTracer(false);
   if (onDone) onDone();
 }
 function finishAuto() {

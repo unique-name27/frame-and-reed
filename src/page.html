@@ -239,9 +239,10 @@ summary{color:var(--ink);text-transform:uppercase;letter-spacing:.06em;font-size
       <h2><span class="num">01</span>Your harp</h2>
       <p class="lede">Upload a top-down photo of your harp and the outline gets traced off it. Type in how long the harp is and every other measurement follows.</p>
       <div class="photo-row">
-        <label class="btn primary" for="file">Upload a photo of your harp<input id="file" type="file" accept="image/*" hidden></label>
+        <button id="upload" class="btn primary" type="button">Upload a photo of your harp</button><input id="file" type="file" accept="image/*" hidden>
         <button id="sample" class="btn ghost" type="button">See it on a sample</button>
       </div>
+      <p class="status err" id="photo-status" role="alert" hidden></p>
       <p class="note"><b>What the photo needs:</b> the harp flat on plain paper, shot from straight above with the camera level, whole harp in frame, trigger and all. Photographed at an angle it traces a squashed outline and the case comes out the wrong shape.</p>
       <p class="lede" style="margin:18px 0 10px">Or start from one of these:</p>
       <div class="presets" id="presets"></div>
@@ -309,7 +310,7 @@ summary{color:var(--ink);text-transform:uppercase;letter-spacing:.06em;font-size
       </div>
       <details>
         <summary>Load a design code</summary>
-        <div class="row" style="display:flex;gap:8px;margin-top:8px"><input id="code" class="text" type="text" placeholder="Paste a design code" spellcheck="false" autocomplete="off"><button id="load" class="btn" type="button">Load</button></div>
+        <div class="row" style="display:flex;gap:8px;margin-top:8px"><input id="code" class="text" type="text" aria-label="Design code" placeholder="Paste a design code" spellcheck="false" autocomplete="off"><button id="load" class="btn" type="button">Load</button></div>
       </details>
       <p class="status" id="status" aria-live="polite"></p>
       <details id="printfor">
@@ -373,7 +374,7 @@ summary{color:var(--ink);text-transform:uppercase;letter-spacing:.06em;font-size
 </section>
 <footer><span>Free to use. The models are yours.</span><span>Preview built with three.js</span></footer>
 
-<div id="tracer" hidden>
+<div id="tracer" role="dialog" aria-modal="true" aria-labelledby="t-step" aria-describedby="t-hint" hidden>
   <div id="tbar">
     <span class="tstep" id="t-step"></span>
     <span class="thint" id="t-hint"></span>

@@ -59,8 +59,8 @@ export const andM = (a, b, not) => { const o = new Uint8Array(a.length); for (le
 export const orM = (a, b) => { const o = new Uint8Array(a.length); for (let i = 0; i < a.length; i++) o[i] = a[i] || b[i] ? 1 : 0; return o; };
 export const countM = m => { let n = 0; for (let i = 0; i < m.length; i++) n += m[i]; return n; };
 // erode / dilate by r millimetres
-export function erodeM(D, m, r) { const d = edt(m, D.w, D.h, true), rp = r / D.res, o = new Uint8Array(m.length); for (let i = 0; i < m.length; i++) o[i] = d[i] > rp ? 1 : 0; return o; }
-export function dilateM(D, m, r) { const d = edt(notM(m), D.w, D.h, false), rp = r / D.res, o = new Uint8Array(m.length); for (let i = 0; i < m.length; i++) o[i] = m[i] || d[i] <= rp ? 1 : 0; return o; }
+export function erodeM(D, m, r) { const d = edt(m, D.w, D.h, true), rp = r / D.res + 1e-6, o = new Uint8Array(m.length); for (let i = 0; i < m.length; i++) o[i] = d[i] > rp ? 1 : 0; return o; }
+export function dilateM(D, m, r) { const d = edt(notM(m), D.w, D.h, false), rp = r / D.res + 1e-6, o = new Uint8Array(m.length); for (let i = 0; i < m.length; i++) o[i] = m[i] || d[i] <= rp ? 1 : 0; return o; }
 // opening removes ink thinner than 2r; closing fills gaps narrower than 2r
 export const openM = (D, m, r) => dilateM(D, erodeM(D, m, r), r);
 export const closeM = (D, m, r) => erodeM(D, dilateM(D, m, r), r);
@@ -151,7 +151,7 @@ function vineSpace(D, area, o) {
     let t = 0, i = 0;
     while (t < g.len) {
       const f = t / g.len, r = g.r0 + (g.r1 - g.r0) * f;
-      th += g.curv(t, f, th) * STEP;
+      th += g.curv(t, f, th, x, z) * STEP;
       if (g.steer) { // look ahead and lean away from the edge
         const la = 1.5 + r, ax = x + Math.cos(th) * la, az = z + Math.sin(th) * la;
         if (T.dmm(ax, az) < r + o.edge + 0.8) { const l = T.dmm(x + Math.cos(th + 0.6) * la, z + Math.sin(th + 0.6) * la), rr = T.dmm(x + Math.cos(th - 0.6) * la, z + Math.sin(th - 0.6) * la); th += (l > rr ? 1 : -1) * 0.09; }
@@ -199,8 +199,9 @@ export function damascus(D, area, o) {
     const wx = 3.2 * n1(X / 15, Z / 15) + 0.9 * n2(X / 5 + 17, Z / 5), wz = 3.2 * n1(X / 15 + 53, Z / 15 + 29) + 0.9 * n2(X / 5 + 71, Z / 5 + 3);
     let v = ((X + wx) * c + (Z + wz) * s) / per;
     for (const q of drops) {
-      const dx = X - q.x, dz = Z - q.z, r = Math.hypot(dx, dz);
-      if (r < q.rad + per) { const t = Math.min(1, Math.max(0, (q.rad - r) / (0.7 * per))); v = v * (1 - t) + (r / per + q.ph) * t; }
+      const dx = X - q.x, dz = Z - q.z, reach = q.rad + per; if (dx >= reach || dx <= -reach || dz >= reach || dz <= -reach) continue;
+      const r = Math.hypot(dx, dz);
+      if (r < reach) { const t = Math.min(1, Math.max(0, (q.rad - r) / (0.7 * per))); v = v * (1 - t) + (r / per + q.ph) * t; }
     }
     if (v - Math.floor(v) < duty) ink[i] = 1;
   }
@@ -223,8 +224,35 @@ function mainStem(V, D, area, o, R) {
     return V.grow(sx, sz, th0, { len: 900, r0: o.stem / 2, r1: o.stem / 2 * 0.8, steer: true, grace: 1.5, dry: true,
       curv: (t, f, th) => { const thd = th0 + A * Math.sin(2 * Math.PI * t / lam + ph); let d = thd - th; d = Math.atan2(Math.sin(d), Math.cos(d)); return 0.9 * d; } });
   };
+  // A curved or bent area (a ring, an L) stops a stem that holds to one axis almost at once. There the stem follows
+  // the band instead: its heading runs along the rim (across the distance field's gradient), leaning in toward the
+  // band's middle, with a smaller swing so it stays off the edges.
+  const band = (() => {
+    const hh = 0.4, grad = (x, z) => [(T.dmm(x + hh, z) - T.dmm(x - hh, z)) / (2 * hh), (T.dmm(x, z + hh) - T.dmm(x, z - hh)) / (2 * hh)];
+    let best = null; for (const i of T.idx) { const p = T.at(i), d = T.dmm(p.x, p.z); if (!best || d > best.d) best = { x: p.x, z: p.z, d }; }
+    if (!best) return null;
+    const [g0x, g0z] = grad(best.x, best.z), gl0 = Math.hypot(g0x, g0z);
+    const th0 = gl0 > 1e-3 ? Math.atan2(g0x, -g0z) : Math.atan2(ax.uz, ax.ux), Ab = 0.35;
+    const curv = (t, f, th, x, z) => {
+      const [gx, gz] = grad(x, z), gl = Math.hypot(gx, gz); if (gl < 0.2) return 0;
+      let tx = -gz / gl, tz = gx / gl; if (tx * Math.cos(th) + tz * Math.sin(th) < 0) { tx = -tx; tz = -tz; }
+      const lean = (tx * gz - tz * gx) / gl > 0 ? 1 : -1; // which way the gradient (toward the middle) lies from the tangent
+      const thd = Math.atan2(tz, tx) + lean * 0.3 * gl + Ab * Math.sin(2 * Math.PI * t / lam + ph);
+      let d = thd - th; d = Math.atan2(Math.sin(d), Math.cos(d)); return 0.9 * d;
+    };
+    return { x: best.x, z: best.z, th0, curv };
+  })();
   // try from both ends without laying anything down, then grow the longer one for real
   const a1 = attempt(1), a2 = attempt(-1), dir = a1.line.length >= a2.line.length ? 1 : -1;
+  const reach = Math.max(a1.line.length, a2.line.length) * 0.25; // mm of stem (samples are 0.25 mm apart)
+  if (band && reach < 0.2 * (hi - lo)) { // only when the axis stem fails outright: an L still does better with flowers in its voids
+    const opt = { len: 900, r0: o.stem / 2, r1: o.stem / 2 * 0.8, steer: true, grace: 1.5, curv: band.curv };
+    const b1 = V.grow(band.x, band.z, band.th0, { ...opt, dry: true }), b2 = V.grow(band.x, band.z, band.th0 + Math.PI, { ...opt, dry: true });
+    if (Math.max(b1.line.length, b2.line.length) * 0.25 > reach * 1.3) {
+      const main = V.grow(band.x, band.z, b1.line.length >= b2.line.length ? band.th0 : band.th0 + Math.PI, opt);
+      return { main, lam, W, ax };
+    }
+  }
   const ux = ax.ux * dir, uz = ax.uz * dir, th0 = Math.atan2(uz, ux), end = dir > 0 ? lo : -hi;
   const cands = T.idx.map(T.at).filter(p => (p.x - ax.cx) * ux + (p.z - ax.cz) * uz < end + 2.5);
   cands.sort((a, b) => T.dmm(b.x, b.z) - T.dmm(a.x, a.z));
@@ -268,7 +296,7 @@ export function scrollwork(D, area, o) {
   const curl = (p, side, rho0, r0, parentSid, len) => {
     let rho = rho0; const tau = rho0 * (2.0 + R() * 0.8);
     const s = V.grow(p.x, p.z, p.th + side * (0.9 + 0.35 * R()), { len: len || 7 * rho0, r0, r1: minR, curv: t => { rho = Math.max(minR * 2.2, rho0 * Math.exp(-t / tau)); return side / rho; }, ignore: new Set([parentSid]), ignoreFor: r0 * 2 + o.sep + 1.2 });
-    if (s.line.length > 6) { V.strokes.push({ line: s.line }); const e = s.line[s.line.length - 1]; V.strokes.push({ dot: { x: e.x, z: e.z, r: Math.max(e.r * 1.4, minR * 1.3) } }); }
+    if (s.line.length >= 8) { V.strokes.push({ line: s.line }); const e = s.line[s.line.length - 1]; V.strokes.push({ dot: { x: e.x, z: e.z, r: Math.max(e.r * 1.4, minR * 1.3) } }); }
     return s;
   };
   const Lm = main.line; let side = R() < 0.5 ? 1 : -1;
@@ -296,7 +324,7 @@ export function scrollwork(D, area, o) {
       const e = stem.line[stem.line.length - 1]; base = { x: e.x, z: e.z, th: e.th, sid: -7 };
     }
     const made = curl({ x: base.x, z: base.z, th: base.th - sd * 1.0 }, sd, Math.max(minR * 3, clear * 0.62), Math.max(minR, stemR * 0.7), base.sid, 8 * clear);
-    if (made.line.length < 8) return !np.rim && !!stem;
+    if (made.line.length < 8) return false;
     if (stem) {
       const sid = V.newSid(); stem.line.forEach((q, i) => V.add(q.x, q.z, q.r, sid, i)); V.strokes.push({ line: stem.line });
       if (R() < 0.7) { const q = stem.line[Math.floor(stem.line.length * 0.5)]; V.leaf(q.x, q.z, q.th + sd * 0.8, o.leaf * 0.8, o.leaf * 0.36, sid, -0.12 * sd); }
@@ -318,12 +346,13 @@ function drawBlossom(ctx, f, o) {
   }
   ctx.beginPath(); ctx.arc(x, z, rad * 0.32, 0, Math.PI * 2); ctx.fill();
   ctx.globalCompositeOperation = 'destination-out'; ctx.lineWidth = o.gap;
-  const r0 = o.pierce ? rad * 0.5 : rad * 0.32 + o.gap * 0.5;
+  // pierced, the petals hang off a ring round the eye: it must be wide enough to survive the clean-up, or the flower falls apart
+  const eyeR = Math.max(o.gap * 0.6, rad * 0.12), r0 = o.pierce ? Math.max(rad * 0.5, eyeR + 2 * (o.clean || 0.35) + o.gap / 2) : rad * 0.32 + o.gap * 0.5;
   if (n === 5) {
     for (let k = 0; k < n; k++) { const a = rot + (k + 0.5) * 2 * Math.PI / n; ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * r0, z + Math.sin(a) * r0); ctx.lineTo(x + Math.cos(a) * (rad + 1), z + Math.sin(a) * (rad + 1)); ctx.stroke(); }
     const nr = rad * 0.15; if (nr > o.gap * 0.7) for (let k = 1; k < n; k++) { const a = rot + k * 2 * Math.PI / n; ctx.beginPath(); ctx.arc(x + Math.cos(a) * rad * 1.05, z + Math.sin(a) * rad * 1.05, nr, 0, Math.PI * 2); ctx.fill(); } // the sakura notch (not on the stem's petal)
   }
-  if (o.pierce || rad * 0.32 < o.gap * 2.2) { ctx.beginPath(); ctx.arc(x, z, Math.max(o.gap * 0.6, rad * 0.12), 0, Math.PI * 2); ctx.fill(); } // a pierced eye
+  if (o.pierce || rad * 0.32 < o.gap * 2.2) { ctx.beginPath(); ctx.arc(x, z, eyeR, 0, Math.PI * 2); ctx.fill(); } // a pierced eye
   else { ctx.beginPath(); ctx.arc(x, z, rad * 0.32 + o.gap * 0.5, 0, Math.PI * 2); ctx.stroke(); } // the pistil stands apart
   ctx.globalCompositeOperation = 'source-over';
 }
@@ -366,7 +395,7 @@ export function flowers(D, area, o) {
   }
   // the biggest gaps left: a flower right in the middle, on a stalk back to the nearest stem
   fillVoids(D, area, V, o.minBloom * 0.95, (np, tx, tz, clear, dist) => {
-    const rad = Math.min(o.R * 1.15, clear * 0.95);
+    const rad = Math.min(o.R * 1.15, clear * 0.95, (clear - o.sep) / 0.88 - 0.05); // fits() needs 0.88·rad + sep of room
     if (rad >= o.minBloom && fits(tx, tz, rad)) { const l = stalk(np, tx, tz, rad); bloom(tx, tz, l[l.length - 1].th, rad); return true; }
     return !np.rim && V.leaf(np.x, np.z, Math.atan2(tz - np.z, tx - np.x), Math.min(o.leaf, dist + clear * 0.7), o.leaf * 0.4, np.sid, 0.1); // no stray leaves stuck on the rim
   });
@@ -422,10 +451,10 @@ export const PATTERNS = ['damascus', 'scroll', 'flowers', 'seigaiha'];
 export function patternInk(kind, D, area, proc, seed, pierce) {
   const S = DECO[proc] || DECO.fdm, k = pierce ? 1.3 : 1;
   let ink;
-  if (kind === 'damascus') ink = damascus(D, area, { seed, period: S.period * (pierce ? 1.35 : 1), duty: pierce ? 0.55 : 0.5 });
+  if (kind === 'damascus') ink = damascus(D, area, { seed, period: S.period * (pierce ? 1.35 : 1), duty: pierce ? 0.55 : 0.5, drops: pierce ? 0 : 1 }); // a raindrop's rings are islands: pierced, they would fall out
   else if (kind === 'scroll') ink = scrollwork(D, area, { seed, stem: S.stem * k, minW: S.minW * k, leaf: S.leaf, sep: S.sep * (pierce ? 1.2 : 1), edge: pierce ? -0.2 : 0.15, maxR: S.leaf * 0.3 + S.stem });
-  else if (kind === 'flowers') ink = flowers(D, area, { seed, R: S.R, gap: S.gap * (pierce ? 1.15 : 1), stem: S.stem * k, minW: S.minW * k, leaf: S.leaf * 0.85, sep: S.sep * (pierce ? 1.2 : 1), edge: pierce ? -0.2 : 0.15, maxR: S.leaf * 0.3 + S.stem, pierce, daisy: S.daisy, minBloom: S.minBloom * (pierce ? 1.15 : 1) });
-  else if (kind === 'seigaiha') ink = seigaiha(D, area, { seed, line: S.line * k, gap: S.gap * (pierce ? 1.15 : 1), rings: S.rings, R: S.R * 1.25, minW: S.minW * k, pierce });
+  else if (kind === 'flowers') ink = flowers(D, area, { seed, R: S.R, gap: S.gap * (pierce ? 1.15 : 1), stem: S.stem * k, minW: S.minW * k, leaf: S.leaf * 0.85, sep: S.sep * (pierce ? 1.2 : 1), edge: pierce ? -0.2 : 0.15, maxR: S.leaf * 0.3 + S.stem, pierce, clean: S.clean * (pierce ? 1.2 : 1), daisy: S.daisy, minBloom: S.minBloom * (pierce ? 1.15 : 1) });
+  else if (kind === 'seigaiha') ink = seigaiha(D, area, { seed, line: S.line * k, gap: S.gap * (pierce ? 1.15 : 1), rings: S.rings, R: S.R * 1.25, minW: S.minW * k, pierce, clean: S.clean * (pierce ? 1.2 : 1) });
   else return new Uint8Array(D.w * D.h);
   // nothing thinner than the printer can hold, no gap narrower than it can open
   const r = S.clean * (pierce ? 1.2 : 1);

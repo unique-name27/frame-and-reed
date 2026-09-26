@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { zipSync, strToU8 } from 'fflate';
-import { IN, PRESETS, mats, state, build, sampleHarpImage, toSTL, toOBJ, parametricHarp } from './engine.js';
+import { IN, PRESETS, mats, state, build, sampleHarpImage, toSTL, toOBJ, parametricHarp, printMeshes } from './engine.js';
+import { solidPieces, piecesToSTL, surfaceCount, manifoldReady } from './solid.js';
 import { openTracer, lastImage } from './tracer.js';
 
 const $ = id => document.getElementById(id);
@@ -269,7 +270,7 @@ function rebuild(draft) {
   let g, dims, report;
   try { ({ g, dims, report } = build(P)); }
   catch (e) { console.error(e); setStatus('That combination could not be built (' + (e.message || e) + '). The previous case is still shown — try a different setting.', true); return false; }
-  current = g; lastDims = dims; lastReport = report; window.__scene = g; window.__report = report; window.__engine = { toSTL, toOBJ, build, THREE, state }; window.__stage = stage;
+  current = g; lastDims = dims; lastReport = report; window.__scene = g; window.__report = report; window.__engine = { toSTL, toOBJ, build, THREE, state, printMeshes, solidPieces, piecesToSTL, surfaceCount, manifoldReady }; window.__stage = stage;
   stage.setObject(g, !first);
   first = false;
   const dv = v => units === 'mm' ? v.toFixed(0) : (v / IN).toFixed(2);
@@ -488,21 +489,29 @@ function settingsCard() {
 }
 const fileTag = () => `jaw-harp-case-${style}-${state.trace ? 'traced' : (preset || shape)}`;
 // the print files: STL(s) for the slicer, and — on request — everything as one zip
-function buildFiles() {
+function buildPrintModel(shop) {
   const saved = state.locks.slice(); state.locks.fill(true); // print pose: every button locked (detent engaged), lid closed, no harp
   // build() re-registers the clickable parts, the lid and the harp in the shared state; the print model is never shown,
   // so the on-screen ones are put back afterwards or the latches in the viewer would stop responding
   const keep = { buttons: state.buttons.slice(), lidGroup: state.lidGroup, harpGroup: state.harpGroup };
-  let g;
-  try { g = build({ ...params(), harp: false, open: 0, printPose: true }).g; } // slide latches retracted, buttons locked, lid closed
+  try { return build({ ...params(), harp: false, open: 0, printPose: true, shop: !!shop }).g; } // slide latches retracted, buttons locked, lid closed
   finally {
     state.locks.splice(0, state.locks.length, ...saved);
     state.buttons.splice(0, state.buttons.length, ...keep.buttons); state.lidGroup = keep.lidGroup; state.harpGroup = keep.harpGroup;
   }
-  const tag = fileTag();
+}
+window.__printModel = shop => ({ g: buildPrintModel(shop), clam: style === 'clam' });
+// every piece in the file is one closed solid: the overlapping slabs the model is built from are unioned first
+async function solidSTL(g, part) {
+  try { const { pieces, raw } = await solidPieces(printMeshes(g, part), THREE); if (pieces.length) return piecesToSTL(pieces, raw); }
+  catch (e) { console.warn('solid union failed; writing the parts as they are', e); }
+  return toSTL(g, part);
+}
+async function buildFiles() {
+  const g = buildPrintModel(false), tag = fileTag();
   const stls = style === 'clam'
-    ? [[`${tag}-base.stl`, toSTL(g, 'base')], [`${tag}-lid.stl`, toSTL(g, 'lid')]]
-    : [[`${tag}.stl`, toSTL(g)]];
+    ? [[`${tag}-base.stl`, await solidSTL(g, 'base')], [`${tag}-lid.stl`, await solidSTL(g, 'lid')]]
+    : [[`${tag}.stl`, await solidSTL(g)]];
   return { g, tag, stls };
 }
 function makeZip(f) {
@@ -522,7 +531,7 @@ const dlError = e => setStatus(e && e.code === 'declined' ? 'Download cancelled.
 $('dl').addEventListener('click', async () => {
   const btn = $('dl'); btn.disabled = true; setStatus('Building the print files…');
   try {
-    const f = buildFiles();
+    const f = await buildFiles();
     try {
       // the STL itself, no wrapper — what the slicer wants and what browsers and virus scanners are least fussy about
       for (const [n, buf] of f.stls) await saveFile(n, buf.slice(0), 'model/stl');
@@ -540,35 +549,100 @@ $('dl').addEventListener('click', async () => {
 // ---------------- have it printed for you ----------------
 // No backend and no money changing hands here: the STL goes to the viewer's own device and a printing
 // marketplace opens beside it, so the order is theirs to place with whichever shop they pick.
+// ---------------- print-shop files ----------------
+// A print bureau checks each file for loose pieces and for spaces that would trap resin, and will not print one part
+// inside another. So a case for a shop has nothing printed in place: cord lashing (one solid piece) or the sliding
+// cover (the case and a separate plate). Everything else keeps its latches captive inside the case, which is fine on
+// your own printer and not something a shop will take on.
+const shopReady = () => (style === 'deck' || style === 'pendant') && (hold === 'lash' || hold === 'slide');
+function shopWhy() {
+  const what = style === 'clam' ? 'The bolt on the lid prints inside its channel'
+    : style === 'sleeve' ? 'The gate prints on a captive peg inside the case'
+    : style === 'multi' ? 'The turn-buttons print on captive pegs inside the rack'
+    : { bladeSide: 'The two blades print inside their tunnels', bladeTop: 'The two blades print inside their tunnels', spine: 'The bolt prints inside its tunnel', twin: 'The two bolts print inside their channels', swing: 'The turn-buttons print on captive pegs' }[hold] || 'The latches print inside the case';
+  return `${what}, with a thin gap of air round them. A shop's checks flag those as loose pieces, and in resin the gap fills with liquid resin that cannot be washed out, so the order gets held.`;
+}
 function renderOrderNote(P) {
-  const note = $('ordernote'); if (!note) return;
-  const moving = !((style === 'deck' || style === 'pendant') && hold === 'lash');
-  if (proc === 'resin') {
-    note.innerHTML = `<b>What to choose there:</b> resin (SLA, DLP or MSLA), and a tough or ABS-like resin if they offer one — standard resin is brittle and a case gets dropped. Ask them not to hollow it.${moving ? ` The moving parts have ${fmtLen('pgap', P.pgap)} of air around them; free each latch after washing, before the final cure.` : ''}`;
+  const note = $('ordernote'), warn = $('shopwarn'); if (!note) return;
+  const ok = shopReady();
+  if (warn) { warn.hidden = ok; $('shopwhy').textContent = ok ? '' : shopWhy(); }
+  showNoWasm();
+  const two = hold === 'slide';
+  if (!ok) { note.innerHTML = ''; return; }
+  note.innerHTML = (proc === 'resin'
+    ? '<b>What to choose there:</b> resin (SLA, DLP or MSLA), and a tough or ABS-like resin if they offer one — standard resin is brittle and a case gets dropped. It is a solid part with no hidden spaces: ask them not to hollow it.'
+    : '<b>What to choose there:</b> FDM in PLA or PETG at 0.2 mm layers is the cheapest; nylon (SLS or MJF) costs more and is close to unbreakable. Any of them prints it.')
+    + (two ? ' The cover is its own file: upload both, as two parts of one order.' : '');
+}
+// The clean-up runs on WebAssembly. A page embedded by a host that forbids it cannot make shop files, so the panel
+// says so as soon as it is opened, with a link to the same design on the live site.
+const SITE = 'https://unique-name27.github.io/frame-and-reed/';
+var solidOK = null; // null until tried (var: the first render reads it before this line runs)
+function showNoWasm() {
+  const el = $('shopnowasm'); if (!el) return;
+  el.hidden = solidOK !== false; if (solidOK === false) $('shopsite').href = SITE + '#' + designCode();
+}
+function checkSolid() {
+  return manifoldReady().then(() => { solidOK = true; showNoWasm(); return true; },
+    e => { console.warn('the solid clean-up could not start here', e); solidOK = false; showNoWasm(); return false; });
+}
+$('printfor').addEventListener('toggle', () => { if ($('printfor').open) checkSolid(); });
+window.__solidOK = () => solidOK;
+window.__shopFiles = () => shopFiles();
+async function shopFiles() {
+  const g = buildPrintModel(true), tag = fileTag();
+  const { pieces, raw } = await solidPieces(printMeshes(g), THREE);
+  if (raw.length) throw new Error('part of the model is not a closed solid (' + raw.map(r => r.name).join(', ') + ')');
+  const keep = pieces.filter(q => q.volume > 1); // under a cubic millimetre is a sliver where two faces met, not a piece
+  const want = hold === 'slide' ? 2 : 1;
+  if (keep.length !== want) throw new Error(`the model came out as ${keep.length} pieces instead of ${want}`);
+  if (keep.some(q => surfaceCount(q) > 1)) throw new Error('the model has a closed space inside it');
+  const stls = keep.map((q, i) => [`${tag}-${i === 0 ? 'case' : 'cover'}.stl`, piecesToSTL([q], [], true)]);
+  return { g, tag, stls };
+}
+function shopZip(f) {
+  const files = {}; f.stls.forEach(([n, buf]) => { files[n] = new Uint8Array(buf.slice(0)); });
+  const card = ['JAW HARP CASE — FILES FOR A PRINT SHOP', '', ...f.stls.map(([n]) => n), '',
+    'Each file is one closed, solid piece in millimetres: no loose parts, no parts printed inside other parts, no enclosed hollows.',
+    f.stls.length > 1 ? 'The cover is a separate part that slides onto the case after printing.' : 'The case is a single part.', '',
+    'Design code: ' + designCode()].join('\n');
+  return zipSync({ ...files, 'README.txt': strToU8(card) }, { level: 6 });
+}
+$('order').addEventListener('click', async e => {
+  if (!shopReady()) {
+    // nothing is saved and the marketplace does not open: a shop would hold this order
+    e.preventDefault(); $('shopwarn').hidden = false; $('shopwarn').scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
+    setStatus('A print shop cannot make a case with latches printed inside it. Pick cord lashing or the sliding cover, then save again.', true);
     return;
   }
-  note.innerHTML = moving
-    ? `<b>What to choose there:</b> FDM (some sites call it FFF) in PLA or PETG, 0.2 mm layers, no supports. The latches and the lid print already assembled, with ${fmtLen('pgap', P.pgap)} of air around them — resin welds that air shut and nylon powder packs it solid. For SLS or MJF, widen the gap to 0.6 mm first${P.pgap < 0.55 ? ' <button id="gap6" class="btn ghost" type="button">set it to 0.6</button>' : ' (set)'} and expect to work the latches loose by hand.`
-    : `<b>What to choose there:</b> whatever is cheapest — this one has no moving parts, only slots for your own cord, so any process prints it. FDM in PLA or PETG at 0.2 mm layers is the usual answer; nylon (SLS or MJF) costs more and is close to unbreakable.`;
-}
-$('order').addEventListener('click', async () => {
-  setStatus('Saving the STL — upload it on the tab that just opened.');
+  if (solidOK === false) {
+    e.preventDefault(); showNoWasm(); $('shopnowasm').scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
+    setStatus('Print-shop files cannot be made on this copy of the page. Use the link to the live site above.', true);
+    return;
+  }
+  setStatus('Saving the print-shop files — upload them on the tab that just opened.');
   try {
-    const f = buildFiles();
+    const f = await shopFiles();
     try {
       for (const [n, buf] of f.stls) await saveFile(n, buf.slice(0), 'model/stl');
       setStatus(f.stls.length > 1
-        ? 'Saved both halves. Upload the two files together — they are one case, quoted as two parts.'
-        : 'Saved. Upload it on the other tab, then pick FDM in PLA or PETG, 0.2 mm layers, no supports.');
-    } catch (e) {
-      if (e && e.code === 'rejected_extension') {
-        try { await saveFile(f.tag + '.zip', makeZip(f), 'application/zip'); setStatus('This host saves the files as a zip — unzip it and upload the .stl from inside.'); }
+        ? 'Saved the case and the cover as two files, each one solid piece. Upload both — they are one case, quoted as two parts.'
+        : 'Saved as one solid piece. Upload it on the other tab.');
+    } catch (err) {
+      if (err && err.code === 'rejected_extension') {
+        try { await saveFile(f.tag + '-print-shop.zip', shopZip(f), 'application/zip'); setStatus('This host saves the files as a zip — unzip it and upload the .stl files from inside.'); }
         catch (e2) { dlError(e2); }
-      } else dlError(e);
+      } else dlError(err);
     }
-  } catch (e) { setStatus('Something went wrong building the files: ' + (e.message || e), true); }
+  } catch (err) { setStatus('The print-shop files could not be made: ' + (err.message || err) + '. Nothing was saved.', true); }
 });
 $('printfor').addEventListener('click', e => {
+  if (e.target && (e.target.closest('#shop-lash') || e.target.closest('#shop-slide'))) {
+    if (!(style === 'deck' || style === 'pendant')) style = 'deck';
+    hold = e.target.closest('#shop-lash') ? 'lash' : 'slide'; rebuildUI();
+    setStatus(hold === 'lash' ? 'Switched to cord lashing: the case is one solid piece, ready for a print shop.' : 'Switched to the sliding cover: the case and the cover are two solid pieces, ready for a print shop.');
+    return;
+  }
   if (e.target && e.target.id === 'gap6') {
     setv('pgap', 0.6); rebuild();
     setStatus(`Print gap widened to ${L(0.6)}, which is what nylon needs. Save the STL again before you upload it.`);
@@ -576,7 +650,7 @@ $('printfor').addEventListener('click', e => {
 });
 $('dlzip').addEventListener('click', async () => {
   const btn = $('dlzip'); btn.disabled = true; setStatus('Building the print files…');
-  try { const f = buildFiles(); await saveFile(f.tag + '.zip', makeZip(f), 'application/zip'); setStatus('Saved: STL, OBJ + MTL and a README with your settings.'); }
+  try { const f = await buildFiles(); await saveFile(f.tag + '.zip', makeZip(f), 'application/zip'); setStatus('Saved: STL, OBJ + MTL and a README with your settings.'); }
   catch (e) { dlError(e); }
   btn.disabled = false;
 });

@@ -157,8 +157,39 @@ function subdivide(pts, maxLen = 4) {
   for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.max(1, Math.ceil(L / maxLen)); for (let k = 0; k < n; k++) out.push([a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n]); }
   return out;
 }
+// A traced outline that passes the same pixel twice (two parts of a region meeting only at a corner, or a neck one
+// pixel wide) turns into an outline that touches itself, and an extrusion of that is not a closed solid: a print
+// bureau's check reports it as holes in the part. Such a mask is first cleaned — corner-only contacts filled in, and
+// anything a single pixel wide opened away — and traced again.
+function unpinch(mask, w, h) {
+  const m = mask.slice();
+  for (let pass = 0; pass < 3; pass++) {
+    let changed = false;
+    for (let y = 0; y < h - 1; y++) for (let x = 0; x < w - 1; x++) {
+      const a = y * w + x, b = a + 1, c = a + w, d = c + 1;
+      if (m[a] && m[d] && !m[b] && !m[c]) { m[b] = 1; changed = true; } else if (m[b] && m[c] && !m[a] && !m[d]) { m[a] = 1; changed = true; }
+    }
+    if (!changed) break;
+  }
+  // a one-pixel neck or spike: a set pixel with no set neighbour on either side, left-right and up-down
+  for (let pass = 0; pass < 2; pass++) {
+    let changed = false;
+    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x; if (!m[i]) continue;
+      if ((!m[i - 1] && !m[i + 1]) || (!m[i - w] && !m[i + w])) { m[i] = 0; changed = true; }
+    }
+    if (!changed) break;
+  }
+  return m;
+}
+function traceClean(mask, w, h) {
+  let pts = traceMask(mask, w, h);
+  const seen = new Set(); let twice = false; for (const [x, y] of pts) { const k = y * w + x; if (seen.has(k)) { twice = true; break; } seen.add(k); }
+  if (twice) { const t = traceMask(unpinch(mask, w, h), w, h); if (t.length >= 8) pts = t; }
+  return pts;
+}
 function contour(R, mask) {
-  const px = chaikin(subdivide(rdp(traceMask(mask, R.w, R.h), 1.4)), 2);
+  const px = chaikin(subdivide(rdp(traceClean(mask, R.w, R.h), 1.4)), 2);
   return px.map(p => R.toMm(p[0] + 0.5, p[1] + 0.5));
 }
 // drop duplicate and collinear points before extruding: earcut silently skips them when it triangulates the caps,
@@ -247,7 +278,7 @@ function slab(shape, h, yBase, mat, name, bevel = 0, inset = 0) {
   if (bevel > 0 && capCoversHole(g, shape)) { g.dispose(); g = make(0); bevel = 0; flat = true; }
   g.rotateX(Math.PI / 2);
   g.translate(0, yBase + h - bevel, 0);
-  const m = new THREE.Mesh(g, mat); m.name = name; m.userData.flat = flat; return m;
+  const m = new THREE.Mesh(g, mat); m.name = name; m.userData.flat = flat; m.userData.src = { shape, yBase, h }; return m;
 }
 // slab with a bevel on only the chosen faces: a plain extrusion plus a short beveled cap at each bevelled end.
 // The cap's straight section is inset 0.05 mm and the plain part starts 0.03 mm inside it, so the two closed solids
@@ -268,7 +299,7 @@ function slabB(shape, h, yBase, mat, name, bevTop = 0, bevBot = 0) {
   plain.rotateX(Math.PI / 2); plain.translate(0, y1, 0); parts.push(plain);
   if (capB) parts.push(cB.geometry);
   if (capT) parts.push(cT.geometry);
-  const m = new THREE.Mesh(parts.length > 1 ? mergeGeometries(parts) : parts[0], mat); m.name = name; return m;
+  const m = new THREE.Mesh(parts.length > 1 ? mergeGeometries(parts) : parts[0], mat); m.name = name; m.userData.src = { shape, yBase, h }; return m;
 }
 // a hollow cylinder along z, centred on the origin
 function tube(rOut, rIn, len) {
@@ -838,24 +869,33 @@ export function build(P) {
         const ex = R.x0 + (edge + (dir > 0 ? 0 : 1)) * RES; // the wall, in mm
         need = Math.max(need, dir * (ex - sd.x) + gap + 0.3 + padW / 2);
       }
-      padXs.set(sd, Math.min(pivotOff + clr + frameT + 3 - padW / 2 + 1.5, Math.max(pivotOff + clr + frameT / 2 + 0.7, need))); // and never past the end of the bar
+      // ...and short of the middle of the pocket, where the other button's pad comes from: on a narrow harp the two would
+      // otherwise meet and print as one piece. Where there is not room for the full pad between the wall and the middle,
+      // it is made narrower.
+      const outerMin = need - padW / 2, innerMax = Math.abs(sd.x - offs[0]) - 0.6, barEnd = pivotOff + clr + frameT + 3 + 1.5;
+      let x = Math.min(barEnd - padW / 2, Math.max(pivotOff + clr + frameT / 2 + 0.7, need)), w = padW;
+      if (x + w / 2 > innerMax) { x = innerMax - w / 2; if (x - w / 2 < outerMin) { w = Math.max(1.2, innerMax - outerMin); x = outerMin + w / 2; } }
+      padXs.set(sd, { x, w });
     });
-    if (P.printPose && style !== 'multi') sides.forEach(sd => {
+    if (P.printPose && !P.shop && style !== 'multi') sides.forEach(sd => {
       if (sd.gate || sd.double) return;
-      const base = sd.sg > 0 ? Math.PI : 0, cx = sd.x + (padXs.get(sd) - 0.7) * Math.cos(base); // under the pad, over the frame bar
+      const base = sd.sg > 0 ? Math.PI : 0, pd = padXs.get(sd), cx = sd.x + pd.x * Math.cos(base); // under the middle of the pad
       // slot half-sizes: inside the bar's footprint, and at least 0.8 mm clear of any window in a pendant's floor
-      const hz = 2.6; let hx = Math.max(0.6, frameT / 2 - 0.3);
+      const hz = 2.6; let hx = Math.max(0.6, Math.min(frameT / 2 - 0.3, pd.w / 2 - 0.2));
       const hits = w => { const m = maskOf(R, [rect(cx - w, sd.z - hz, cx + w, sd.z + hz)], 0); for (let k = 0; k < m.length; k++) if (m[k] && winM[k]) return true; return false; };
       if (winM) while (hx >= 0.6 && hits(hx)) hx -= 0.2;
-      if (hx >= 0.6) floorPosts.push({ x: cx, z: sd.z, hx, hz });
+      if (hx - Math.min(gap, 0.4) >= 0.5) floorPosts.push({ x: cx, z: sd.z, hx, hz }); // a post at least 1 mm across, or none
     });
     const postHoles = floorPosts.map(q => contour(R, maskOf(R, [rect(q.x - q.hx, q.z - q.hz, q.x + q.hx, q.z + q.hz)], 0))); // traced like every other outline, so it winds the same way
     floorPosts.forEach(q => {
-      const top = frameTop + gap - 0.2, post = new THREE.Mesh(new THREE.BoxGeometry(2 * (q.hx - gap), top, 2 * (q.hz - gap)), mats.body);
+      const top = frameTop + gap - 0.2, pg = Math.min(gap, 0.4), post = new THREE.Mesh(new THREE.BoxGeometry(2 * (q.hx - pg), top, 2 * (q.hz - pg)), mats.body);
       post.position.set(q.x, top / 2, q.z); post.name = 'support-post'; g.add(post);
     });
     pockets.forEach((p, i) => {
-      const floorShape = () => { const sh = shapeOf(p); if (i === 0) postHoles.forEach(h => sh.holes.push(pathOf(h))); return sh; };
+      // the floor is cut 0.3 mm larger than the pocket, so it runs into the deck floor round it: two solids that only touch
+      // side by side come out of a print bureau's checks as separate pieces
+      const pGrown = contour(R, maskOf(R, [{ poly: p }], 0.3));
+      const floorShape = () => { const sh = shapeOf(pGrown); if (i === 0) postHoles.forEach(h => sh.holes.push(pathOf(h))); return sh; };
       const fS = floorShape(), lS = shapeOf(felts[i]), floorName = 'pocket-floor' + (nb > 1 ? '-' + (i + 1) : '');
       let floorDone = false;
       if (style === 'pendant') {
@@ -878,7 +918,7 @@ export function build(P) {
   // turn-buttons, print-in-place captive pivot
   const barW = 7, barT = 3, padH = Dlow + gap - (floorT + feltT + frameH + gap);
   sides.forEach((s, k) => {
-    const reach = s.gate ? hW / 2 + clr + gateOff : s.double ? webHalf + clr + frameT + 3 : pivotOff + clr + frameT + 3;
+    const reach = s.gate ? hW / 2 + clr + gateOff : s.double ? webHalf + clr + frameT + 3 : Math.min(pivotOff + clr + frameT + 3, Math.abs(s.x - offs[0]) - barW / 2 - 0.5); // short of the other bar on a narrow harp
     const bar = new THREE.Shape(); const x0 = s.double ? -reach : 0;
     bar.moveTo(x0, barW / 2); bar.absarc(x0, 0, barW / 2, Math.PI / 2, -Math.PI / 2, false); bar.absarc(reach, 0, barW / 2, -Math.PI / 2, Math.PI / 2, false); bar.closePath();
     bar.holes.push(circlePath(3.2, 0, 0.6 + gap + 0.6)); // detent: a bump on the body sits in this hole when locked (the 0.6 bevel closes the hole to 0.6+gap at the faces); a 0.3 mm lift lets the bar turn
@@ -889,20 +929,20 @@ export function build(P) {
     const base = s.gate ? 0 : s.double ? 0 : (s.sg > 0 ? Math.PI : 0);
     m.userData = { button: k, base, open: base + (s.gate ? 1 : s.double ? 1 : s.sg) * Math.PI / 2 };
     m.rotation.y = P.printPose ? base : (locks[k] ?? true) ? base : m.userData.open;
-    const bump = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, gap + 0.3, 16), mats.body); bump.position.set(s.x + 3.2 * Math.cos(base), yBar - gap + (gap + 0.3) / 2, s.z - 3.2 * Math.sin(base)); bump.name = 'detent'; g.add(bump);
+    const bump = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, gap + 0.3, 16), mats.body); bump.scale.y = (gap + 0.5) / (gap + 0.3); bump.position.set(s.x + 3.2 * Math.cos(base), yBar - gap - 0.2 + (gap + 0.5) / 2, s.z - 3.2 * Math.sin(base)); bump.name = 'detent'; g.add(bump); // rooted 0.2 mm into the deck
     if (s.gate) {
       // a deep pad hangs in front of the ring and blocks it from sliding back out
       const padG = yBar - (floorT + feltT + 0.3);
-      const pad = new THREE.Mesh(new THREE.BoxGeometry(Math.min(hW * 0.6, 12), padG, 3), mats.accent); pad.position.set(reach, -padG / 2, 0); pad.name = 'gate-pad'; m.add(pad);
-      if (P.printPose) { // the pad hangs past the mouth with only the bed below it: a loose post one layer under it holds it up while printing
+      const pad = new THREE.Mesh(new THREE.BoxGeometry(Math.min(hW * 0.6, 12), padG + 0.2, 3), mats.accent); pad.position.set(reach, -padG / 2 + 0.1, 0); pad.name = 'gate-pad'; m.add(pad);
+      if (P.printPose && !P.shop) { // the pad hangs past the mouth with only the bed below it: a loose post one layer under it holds it up while printing
         const top = yBar - padG - 0.2, pw = Math.min(hW * 0.6, 12) - 0.8, post = new THREE.Mesh(new THREE.BoxGeometry(pw, top, 2.2), mats.body);
         post.position.set(s.x + reach, top / 2, s.z); post.name = 'support-post'; g.add(post);
       }
-    } else if (style !== 'multi') (s.double ? [1, -1] : [1]).forEach(d => { const padX = s.double ? webHalf + clr + frameT / 2 + 0.7 : padXs.get(s); /* pad sits clear of the pocket wall */ const pad = new THREE.Mesh(new THREE.BoxGeometry(frameT + 1, padH, barW - 1), mats.accent); pad.position.set(d * padX, -padH / 2, 0); pad.name = 'button-pad'; m.add(pad); });
+    } else if (style !== 'multi') (s.double ? [1, -1] : [1]).forEach(d => { const pd = s.double ? { x: webHalf + clr + frameT / 2 + 0.7, w: frameT + 1 } : padXs.get(s), padX = pd.x; /* pad sits clear of the pocket wall */ const pad = new THREE.Mesh(new THREE.BoxGeometry(pd.w, padH + 0.2, barW - 1), mats.accent); pad.position.set(d * padX, -padH / 2 + 0.1, 0); pad.name = 'button-pad'; m.add(pad); });
     const yHead = yC0 + gap, pegL = yBar - yHead - headH;
-    const peg = new THREE.Mesh(new THREE.CylinderGeometry(pegR, pegR, pegL + 0.2, 32), mats.accent); peg.position.set(0, -pegL / 2 + 0.1, 0); peg.name = 'pivot-peg'; m.add(peg);
+    const peg = new THREE.Mesh(new THREE.CylinderGeometry(pegR, pegR, pegL + 0.4, 32), mats.accent); peg.position.set(0, -pegL / 2, 0); peg.name = 'pivot-peg'; m.add(peg); // 0.2 mm into the bar above and the head below
     const head = new THREE.Mesh(new THREE.CylinderGeometry(headR, headR, headH, 32), mats.accent); head.position.set(0, -pegL - headH / 2, 0); head.name = 'captive-head'; m.add(head);
-    const grip = new THREE.Mesh(new THREE.BoxGeometry(barW - 2, 0.8, 1.2), mats.accent); grip.position.set(0, barT + 0.4, 0); grip.name = 'thumb-grip'; m.add(grip);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(barW - 2, 1.0, 1.2), mats.accent); grip.position.set(0, barT + 0.3, 0); grip.name = 'thumb-grip'; m.add(grip);
     buttons[k] = m; g.add(m);
   });
   while (locks.length < sides.length) locks.push(true);
@@ -921,7 +961,7 @@ export function build(P) {
     if (decoOn) decoNotes.push({ where: 'lid-roof', ...decorate({ P, R, group: lid, prefix: 'lid-', region: lroofM, yTop: D + lidT, parts: [{ shape: lroofS, h: lidT, y: D, name: 'lid-roof', bevel: 0.8 }], seedOff: 3 }) });
     else lid.add(slab(lroofS, lidT, D, mats.body, 'lid-roof', 0.8));
     const capB = bboxOf(hood);
-    const front = new THREE.Mesh(new THREE.BoxGeometry(capB.maxX - capB.minX - 0.6, D - Dlow - lidT + 0.01, lidT), mats.body); front.position.set((capB.maxX + capB.minX) / 2, Dlow + lidT + (D - Dlow - lidT) / 2, zStep - lidT / 2); front.name = 'lid-hood-front'; lid.add(front);
+    const front = new THREE.Mesh(new THREE.BoxGeometry(capB.maxX - capB.minX - 0.6, D - Dlow - lidT + 0.2, lidT), mats.body); front.position.set((capB.maxX + capB.minX) / 2, Dlow + lidT + (D - Dlow - lidT) / 2 - 0.1, zStep - lidT / 2); front.name = 'lid-hood-front'; lid.add(front);
     // ---- sliding bolt latch: a bolt in a print-in-place channel on the plate slides 6 mm past the plate's end into a
     //      keeper tunnel standing on the end tab. Tunnel holds the bolt tip on four sides; a detent bump clicks it home. ----
     {
@@ -929,8 +969,8 @@ export function build(P) {
       const endPts = contour(R, rowsCut(outerNoTab, R, zStep, false)).filter(p => Math.abs(p.x - tabX) < bW / 2 + gap + wallC);
       const zE = endPts.length ? Math.min(...endPts.map(p => p.z)) : obNT.minZ; // the plate's end at the tab
       const chW = bW / 2 + gap + wallC, chH = gap + bH + gap, z0 = zE + 1, z1 = z0 + bL + gap + wallC;
-      [1, -1].forEach(sg => { const wl = new THREE.Mesh(new THREE.BoxGeometry(wallC, chH, z1 - z0), mats.body); wl.position.set(tabX + sg * (chW - wallC / 2), plateTop + chH / 2, (z0 + z1) / 2); wl.name = 'bolt-channel'; lid.add(wl); });
-      const back = new THREE.Mesh(new THREE.BoxGeometry(2 * chW, chH, wallC), mats.body); back.position.set(tabX, plateTop + chH / 2, z1 - wallC / 2); back.name = 'bolt-channel'; lid.add(back);
+      [1, -1].forEach(sg => { const wl = new THREE.Mesh(new THREE.BoxGeometry(wallC, chH + 0.2, z1 - z0), mats.body); wl.position.set(tabX + sg * (chW - wallC / 2), plateTop + chH / 2 - 0.1, (z0 + z1) / 2); wl.name = 'bolt-channel'; lid.add(wl); });
+      const back = new THREE.Mesh(new THREE.BoxGeometry(2 * chW, chH + 0.2, wallC), mats.body); back.position.set(tabX, plateTop + chH / 2 - 0.1, z1 - wallC / 2); back.name = 'bolt-channel'; lid.add(back);
       const zLock = zE - travel, zOpen = zE + gap; // the bolt's front face, locked and retracted
       const roofS = new THREE.Shape(); roofS.moveTo(tabX - chW, z0); roofS.lineTo(tabX + chW, z0); roofS.lineTo(tabX + chW, z1); roofS.lineTo(tabX - chW, z1); roofS.closePath();
       const slot = new THREE.Path(); const sx0 = tabX - nubL / 2 - gap, sx1 = tabX + nubL / 2 + gap, sz0 = zLock + nubU - nubL / 2 - gap, sz1 = zOpen + nubU + nubL / 2 + gap;
@@ -939,13 +979,13 @@ export function build(P) {
       const boltS = new THREE.Shape(); boltS.moveTo(-bW / 2, 0); boltS.lineTo(bW / 2, 0); boltS.lineTo(bW / 2, bL); boltS.lineTo(-bW / 2, bL); boltS.closePath();
       boltS.holes.push(circlePath(0, holeU, 0.6 + gap));
       const bolt = slab(boltS, bH, 0, mats.accent, 'bolt', 0); bolt.geometry.translate(0, plateTop + gap, 0);
-      const nub = new THREE.Mesh(new THREE.BoxGeometry(nubL, gap + roofC + 1.6, nubL), mats.accent); nub.position.set(0, plateTop + gap + bH + (gap + roofC + 1.6) / 2, nubU); nub.name = 'bolt-thumb'; bolt.add(nub);
+      const nub = new THREE.Mesh(new THREE.BoxGeometry(nubL, gap + roofC + 1.6 + 0.2, nubL), mats.accent); nub.position.set(0, plateTop + gap + bH + (gap + roofC + 1.6) / 2 - 0.1, nubU); nub.name = 'bolt-thumb'; bolt.add(nub);
       bolt.position.set(tabX, 0, P.printPose ? zLock : (locks[0] ?? true) ? zLock : zOpen);
       bolt.userData = { button: 0, slide: true, base: zLock, open: zOpen };
       buttons.length = 0; buttons[0] = bolt; lid.add(bolt); while (locks.length < 1) locks.push(true);
-      const bump = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, gap + 0.3, 16), mats.body); bump.position.set(tabX, plateTop + (gap + 0.3) / 2, zLock + holeU); bump.name = 'bolt-detent'; lid.add(bump);
+      const bump = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, gap + 0.3, 16), mats.body); bump.scale.y = (gap + 0.5) / (gap + 0.3); bump.position.set(tabX, plateTop - 0.2 + (gap + 0.5) / 2, zLock + holeU); bump.name = 'bolt-detent'; lid.add(bump);
       // keeper: a block on the tab with a tunnel the bolt tip enters; built as a z-extrusion of its (x, y) section
-      const kT = plateTop + chH + roofC, sec = new THREE.Shape(); sec.moveTo(tabX - chW, Dlow); sec.lineTo(tabX + chW, Dlow); sec.lineTo(tabX + chW, kT); sec.lineTo(tabX - chW, kT); sec.closePath();
+      const kT = plateTop + chH + roofC, sec = new THREE.Shape(); sec.moveTo(tabX - chW, Dlow - 0.2); sec.lineTo(tabX + chW, Dlow - 0.2); sec.lineTo(tabX + chW, kT); sec.lineTo(tabX - chW, kT); sec.closePath(); // the keeper is rooted 0.2 mm into the tab, so it is one solid with it
       const tun = new THREE.Path(); tun.moveTo(tabX - bW / 2 - gap, plateTop); tun.lineTo(tabX + bW / 2 + gap, plateTop); tun.lineTo(tabX + bW / 2 + gap, plateTop + chH); tun.lineTo(tabX - bW / 2 - gap, plateTop + chH); tun.closePath(); sec.holes.push(tun);
       const kL = travel + 1.5, keeper = new THREE.Mesh(new THREE.ExtrudeGeometry(sec, { depth: kL, steps: 1, bevelEnabled: false }), mats.body); keeper.position.z = zE - gap - kL; keeper.name = 'bolt-keeper'; g.add(keeper);
       if (decoOn) {
@@ -953,9 +993,11 @@ export function build(P) {
         decoNotes.push({ where: 'lid', bed: true, ...decorate({ P, R, group: lid, prefix: 'lid-', region: plateM, yTop: Dlow + lidT, parts: [{ shape: plateS, h: lidT, y: Dlow, name: 'lid-plate', bevel: 0.8, pierce: true }], window: and(plateM, pocketMask), keepOut, seedOff: 4 }) });
       }
     }
-    const zA = zc + 2, zB = zStep - 2, nK = 5, kl = (zB - zA) / nK, wx0 = obNT.maxX - 1.5, wx1 = axisX - bore - 0.4;
+    const zA = zc + 2, zB = zStep - 2, nK = 5, kl = (zB - zA) / nK, wx1 = axisX - bore - 0.4;
+    // where the case's side actually is over a knuckle's length (the outline curves in away from its widest point)
+    const edgeAt = (z0, z1) => { let e = Infinity; for (let z = z0; z <= z1; z += RES) { const py = Math.round((z - R.z0) / RES); if (py < 0 || py >= R.h) continue; for (let x = R.w - 1; x >= 0; x--) if (outerNoTab[py * R.w + x]) { e = Math.min(e, R.x0 + (x + 1) * RES); break; } } return isFinite(e) ? e : obNT.maxX; };
     for (let i = 0; i < nK; i++) {
-      const zk = zA + kl * (i + 0.5), isLid = i % 2 === 1, len = kl - 0.4;
+      const zk = zA + kl * (i + 0.5), isLid = i % 2 === 1, len = kl - 0.4, wx0 = edgeAt(zk - len / 2, zk + len / 2) - 1.5;
       const kn = new THREE.Mesh(tube(hr, bore, len), mats.body); kn.position.set(axisX, axisY, zk); kn.name = (isLid ? 'lid' : 'base') + '-knuckle';
       // a shelf under the whole hinge: solid up to the deck top, and for the base knuckles a block up to the axis beside the plate
       const shelfTop = isLid ? axisY - hr - gap : Dlow;
@@ -963,7 +1005,7 @@ export function build(P) {
       if (isLid) {
         const web = new THREE.Mesh(new THREE.BoxGeometry(wx1 - wx0, lidT, len), mats.body); web.position.set((wx0 + wx1) / 2, Dlow + lidT / 2, zk); web.name = 'hinge-web'; lid.add(web); lid.add(kn);
       } else {
-        const bx0 = obNT.maxX + gap, riser = new THREE.Mesh(new THREE.BoxGeometry(axisX + hr - bx0, axisY - Dlow, len), mats.body); riser.position.set((bx0 + axisX + hr) / 2, (Dlow + axisY) / 2, zk); riser.name = 'hinge-riser'; g.add(riser); g.add(kn);
+        const bx0 = obNT.maxX + gap, riser = new THREE.Mesh(new THREE.BoxGeometry(axisX + hr - bx0, axisY - Dlow + 0.2, len), mats.body); riser.position.set((bx0 + axisX + hr) / 2, (Dlow - 0.2 + axisY) / 2, zk); riser.name = 'hinge-riser'; g.add(riser); g.add(kn);
       }
     }
     const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.875, 0.875, zB - zA + 4, 24), mats.accent); pin.rotation.x = Math.PI / 2; pin.position.set(axisX, axisY, (zA + zB) / 2); pin.name = 'hinge-pin'; g.add(pin);
@@ -1083,12 +1125,12 @@ function buildSlideCover(g, c) {
   maskToShapes(R, sideM).forEach(l => g.add(slab(l.shape, yLip - Dlow, Dlow, mats.body, 'cover-rail')));
   maskToShapes(R, lipM).forEach(l => g.add(slab(l.shape, lipT, yLip, mats.body, 'cover-lip', 0.6)));
   const bump = new THREE.Mesh(new THREE.CylinderGeometry(rB, rB, gap + 0.3, 16), mats.body);
-  bump.position.set(0, Dlow + (gap + 0.3) / 2 - 0.02, zD); bump.name = 'cover-detent'; g.add(bump);
+  bump.scale.y = (gap + 0.5) / (gap + 0.3); bump.position.set(0, Dlow - 0.2 + (gap + 0.5) / 2, zD); bump.name = 'cover-detent'; g.add(bump);
   const pieces = maskToShapes(R, coverM); if (!pieces.length) return;
   const cb = bboxOf(contour(R, coverM)), yCov = Dlow + gap;
   const cover = slab(pieces[0].shape, coverT, yCov, mats.accent, 'cover', 0);
-  const rib = new THREE.Mesh(new THREE.BoxGeometry(Math.min(14, (cb.maxX - cb.minX) * 0.6), 2.2, 2.6), mats.accent);
-  rib.position.set(0, yCov + coverT + 1.1, cb.minZ + 1.5); rib.name = 'cover-thumb'; cover.add(rib);
+  const rib = new THREE.Mesh(new THREE.BoxGeometry(Math.min(14, (cb.maxX - cb.minX) * 0.6), 2.4, 2.6), mats.accent);
+  rib.position.set(0, yCov + coverT + 1.0, cb.minZ + 1.5); rib.name = 'cover-thumb'; cover.add(rib);
   const travel = zStep - cb.minZ + 4;
   cover.userData = { button: 0, slide: true, base: 0, open: -travel };
   if (P.printPose) cover.position.set(obNT.maxX - cb.minX + 8, -yCov, 0); // flat on the bed, beside the case
@@ -1110,6 +1152,8 @@ function buildHold(g, kind, c) {
   const places = kind === 'spine' ? [[tabX, zEnd, Math.PI]] : [[xL, zRing, -Math.PI / 2], [xR, zRing, Math.PI / 2]];
   const toWorld = (px, pz, rot, x, z) => ({ x: px + x * Math.cos(rot) + z * Math.sin(rot), z: pz - x * Math.sin(rot) + z * Math.cos(rot) });
   const rectW = (pl, x0, z0, x1, z1) => ({ poly: [toWorld(pl[0], pl[1], pl[2], x0, z0), toWorld(pl[0], pl[1], pl[2], x1, z0), toWorld(pl[0], pl[1], pl[2], x1, z1), toWorld(pl[0], pl[1], pl[2], x0, z1)] });
+  let tunnelWall = null; // the traced wall round each latch groove, to check the detent bump has something to stand on
+  const orAll = ls => { const o = new Uint8Array(R.w * R.h); for (const l of ls) if (l.mask) for (let i = 0; i < o.length; i++) if (l.mask[i]) o[i] = 1; return o; };
   const fHalf = bW / 2 + 1.5 + gap + 0.15; // the flange, plus print gap and contour rounding
   const notchPrims = places.flatMap(pl => blade
     ? [rectW(pl, -nHalf, -3, nHalf, tunnelEnd), rectW(pl, -fHalf, -3, fHalf, mouthEnd)] // wider mouth for the flange
@@ -1119,7 +1163,8 @@ function buildHold(g, kind, c) {
   if (blade) {
     const tunTop = yBot + bT + gap; // tunnel: frameTop .. tunTop, roof above to Dlow
     addLayer(deckLayer(), frameTop - 3, 3, 'deck-body');
-    addLayer(deckLayer(notchMask), tunTop - frameTop, frameTop, 'deck-tunnel');
+    const tunL = deckLayer(notchMask); tunnelWall = orAll(tunL);
+    addLayer(tunL, tunTop - frameTop, frameTop, 'deck-tunnel');
     let top;
     if (kind === 'bladeTop') { // slot for the thumb tab, cut into the roof layer's mask (it may run into the pocket opening on thick frames)
       const uT = 13, sHalf = 1.2 + gap + 0.25, sEnd = 0.6; // the traced slot has rounded corners, so it is cut a little wider and longer than tab + gap
@@ -1129,23 +1174,31 @@ function buildHold(g, kind, c) {
     addLayer(top, Dlow - tunTop, tunTop, 'deck', 0.8, 0);
   } else {
     addLayer(deckLayer(), frameTop - 3, 3, 'deck-body');
-    addLayer(deckLayer(notchMask), Dlow - frameTop, frameTop, 'deck'); // top layer carries the groove (no bevel: it would pinch it); the bolt rides one gap above its floor
+    const topL = deckLayer(notchMask); tunnelWall = orAll(topL);
+    addLayer(topL, Dlow - frameTop, frameTop, 'deck'); // top layer carries the groove (no bevel: it would pinch it); the bolt rides one gap above its floor
   }
   places.forEach((pl, k) => {
     const grp = new THREE.Group(); grp.position.set(pl[0], 0, pl[1]); grp.rotation.y = pl[2]; grp.name = 'latch-' + (k + 1); g.add(grp);
     const m = slab(latchShape(bW, bL, [uA, uB], rn, flange), bT, yBot, mats.accent, blade ? 'blade-' + (k + 1) : 'bolt-' + (k + 1), 0);
     m.position.z = P.printPose ? openPos : (locks[k] ?? true) ? lockPos : openPos;
     m.userData = { button: k, slide: true, base: lockPos, open: openPos };
-    if (kind === 'bladeSide') { const nub = new THREE.Mesh(new THREE.BoxGeometry(bW, bT + 2.4, 2.4), mats.accent); nub.position.set(0, yBot + bT / 2 + 0.6, f + bL + 1.2); nub.name = 'blade-thumb'; m.add(nub); }
-    else if (kind === 'bladeTop') { const h = Dlow + 1.5 - (yBot + bT), tab = new THREE.Mesh(new THREE.BoxGeometry(2.4, h, 2.4), mats.accent); tab.position.set(0, yBot + bT + h / 2, f + 13); tab.name = 'blade-thumb'; m.add(tab); }
-    else { const h = gap + 1.6 + 1.5, nub = new THREE.Mesh(new THREE.BoxGeometry(2.4, h, 2.4), mats.accent); nub.position.set(0, yBot + bT + h / 2, 8); nub.name = 'bolt-thumb'; m.add(nub); }
+    if (kind === 'bladeSide') { const nub = new THREE.Mesh(new THREE.BoxGeometry(bW, bT + 2.4, 2.4), mats.accent); nub.position.set(0, yBot + bT / 2 + 0.6, f + bL + 1.2 - 0.2); nub.name = 'blade-thumb'; m.add(nub); }
+    else if (kind === 'bladeTop') { const h = Dlow + 1.5 - (yBot + bT), tab = new THREE.Mesh(new THREE.BoxGeometry(2.4, h + 0.2, 2.4), mats.accent); tab.position.set(0, yBot + bT + h / 2 - 0.1, f + 13); tab.name = 'blade-thumb'; m.add(tab); }
+    else { const h = gap + 1.6 + 1.5, nub = new THREE.Mesh(new THREE.BoxGeometry(2.4, h + 0.2, 2.4), mats.accent); nub.position.set(0, yBot + bT + h / 2 - 0.1, 8); nub.name = 'bolt-thumb'; m.add(nub); }
     grp.add(m); buttons[k] = m;
     // detent bump on the tunnel / channel wall (+x side)
-    const bump = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, bT - 0.3, 16), mats.body); bump.position.set(bW / 2 + 0.3, yBot + bT / 2, bumpZ); bump.name = 'detent'; grp.add(bump); // reaches 0.3 mm over the latch edge, so the latch has to push past it: the click
+    // (only where the groove has a wall on that side: on a thin rim the groove can run out through the outline, and a bump
+    // there would stand on nothing)
+    const wallHit = (() => { if (!tunnelWall) return true; const m = maskOf(R, [rectW(pl, nHalf + 0.1, bumpZ - 0.4, nHalf + 0.5, bumpZ + 0.4)], 0); let n = 0, hit = 0; for (let i = 0; i < m.length; i++) if (m[i]) { n++; if (tunnelWall[i]) hit++; } return n > 0 && hit >= n * 0.6; })();
+    if (wallHit) {
+      const bump = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, bT - 0.3, 16), mats.body); bump.position.set(bW / 2 + 0.3, yBot + bT / 2, bumpZ); bump.name = 'detent'; grp.add(bump);
+      // and a web behind it into the tunnel wall, which the rasterised wall may not quite reach with a wide print gap
+      { const x0 = bW / 2 + 0.3, x1 = nHalf + 0.5, web = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, bT - 0.3, 0.8), mats.body); web.position.set((x0 + x1) / 2, yBot + bT / 2, bumpZ); web.name = 'detent'; grp.add(web); } // reaches 0.3 mm over the latch edge, so the latch has to push past it: the click
+    }
     if (!blade) { // roofed channel on the deck top
       const chH = yBot + bT + gap - Dlow, z0 = 0.8, z1 = openPos + bL + gap + wallC, xw = nHalf + wallC / 2;
-      [1, -1].forEach(sg => { const w = new THREE.Mesh(new THREE.BoxGeometry(wallC, chH, z1 - z0), mats.body); w.position.set(sg * xw, Dlow + chH / 2, (z0 + z1) / 2); w.name = 'channel'; grp.add(w); });
-      const back = new THREE.Mesh(new THREE.BoxGeometry(2 * nHalf + 2 * wallC, chH, wallC), mats.body); back.position.set(0, Dlow + chH / 2, z1 - wallC / 2); back.name = 'channel'; grp.add(back);
+      [1, -1].forEach(sg => { const w = new THREE.Mesh(new THREE.BoxGeometry(wallC, chH + 0.2, z1 - z0), mats.body); w.position.set(sg * xw, Dlow + chH / 2 - 0.1, (z0 + z1) / 2); w.name = 'channel'; grp.add(w); });
+      const back = new THREE.Mesh(new THREE.BoxGeometry(2 * nHalf + 2 * wallC, chH + 0.2, wallC), mats.body); back.position.set(0, Dlow + chH / 2 - 0.1, z1 - wallC / 2); back.name = 'channel'; grp.add(back);
       // the thumb-nub slot in the roof: a closed slot when a rim of at least one wall thickness is left at the front,
       // otherwise the roof is a U that is open at the front edge (a hole crossing the outline would be dropped by the triangulator)
       const roof = new THREE.Shape(), sx = 1.2 + gap, sz0 = lockPos + 8 - 1.2 - gap, sz1 = openPos + 8 + 1.2 + gap, w = nHalf + wallC;
@@ -1163,7 +1216,7 @@ function buildHold(g, kind, c) {
 
 // ---- export: binary STL + OBJ/MTL in millimetres, print parts only ----
 const isHarp = o => /^jaw-harp(-\d+)?$/.test(o.name);
-function printMeshes(g, part) {
+export function printMeshes(g, part) {
   g.updateMatrixWorld(true);
   const out = [];
   g.traverse(o => {
@@ -1287,6 +1340,9 @@ function fitReport(c) {
     const WH2 = { hood: 'hood', roof: 'roof', lid: 'lid', 'lid-roof': 'lid', deck: 'deck', floor: 'floor' };
     add('decor-thin', false, 'warn', `The pattern only found room for a few strokes on the ${[...new Set(notes.filter(n => n.thin).map(n => WH2[n.where]))].join(' and ')}: the space there is too narrow for it. Try another pattern (Damascus and the waves fill any shape), or widen the wall.`);
   }
+  // a print bureau will not take parts printed inside other parts, and holds the order
+  const shopOk = (style === 'deck' || style === 'pendant') && (holdKind === 'lash' || holdKind === 'slide');
+  if (!shopOk) add('shop', true, 'info', `For your own printer only: the ${style === 'clam' ? 'lid bolt prints' : style === 'sleeve' ? 'gate prints' : 'latches print'} inside the case, which a print shop will not take on (its checks see loose pieces, and in resin the gaps trap liquid resin). To have it printed by a shop, choose cord lashing or the sliding cover — "Have one printed" below makes the files for them.`);
   if (proc === 'resin') {
     const moving = !(holdKind === 'lash' || holdKind === 'slide');
     if (moving) add('resin-gap', (P.gap || 0.4) >= 0.55, 'warn', (P.gap || 0.4) >= 0.55

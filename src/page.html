@@ -114,6 +114,9 @@ details[open] summary::before{transform:rotate(45deg)}
 .btn.primary:hover{filter:brightness(1.08)}
 .btn.ghost{border-color:transparent;background:transparent;color:var(--accent)}
 .btn:disabled{opacity:.5;cursor:default}
+.shopwarn{margin-top:12px;padding:10px 12px;border:1.5px solid var(--brass);background:color-mix(in srgb,var(--brass) 10%,var(--surface));font-size:13px;line-height:1.45}
+.shopwarn p{margin:0}
+.shopwarn .btn .sub{font-family:var(--mono);font-weight:400;font-size:11px;color:var(--muted)}
 .traced{display:none;margin-top:12px;padding:10px 12px;border-radius:6px;background:var(--accent-soft);font-size:13px;line-height:1.45}
 .traced.on{display:block}
 .traced .row{display:flex;gap:8px;margin-top:8px}
@@ -316,11 +319,16 @@ summary{color:var(--ink);text-transform:uppercase;letter-spacing:.06em;font-size
       <p class="status" id="status" aria-live="polite"></p>
       <details id="printfor">
         <summary>No printer? Have one printed and posted to you</summary>
-        <p class="note" style="margin-top:10px">The STL saves to this device first, then a printing marketplace opens in a second tab. Drop the file in there and it prices the job across a list of print shops. The order is between you and the shop you pick — nothing is bought or sold on this page.</p>
-        <div class="photo-row"><a id="order" class="btn primary" href="https://craftcloud3d.com/en/upload" target="_blank" rel="noopener">Save the STL and open the marketplace</a></div>
+        <p class="note" style="margin-top:10px">A print shop gets its own files: each piece of the case as one closed solid in its own STL, with nothing printed inside anything else, so it passes the checks a shop runs before it takes the job. They save to this device first, then a printing marketplace opens in a second tab. Drop them in there and it prices the job across a list of shops. The order is between you and the shop you pick — nothing is bought or sold on this page.</p>
+        <div class="shopwarn" id="shopwarn" role="note" hidden>
+          <p><b>A print shop can't make this one as it stands.</b> <span id="shopwhy"></span> For a shop, pick a way of holding the harp with nothing printed inside the case:</p>
+          <div class="photo-row"><button id="shop-lash" class="btn" type="button">Cord lashing <span class="sub">one solid piece</span></button><button id="shop-slide" class="btn" type="button">Sliding cover <span class="sub">case + cover</span></button></div>
+        </div>
+        <p class="shopwarn" id="shopnowasm" role="note" hidden><b>This copy of the page can't make print-shop files.</b> The site it is shown on blocks the WebAssembly that turns the model into one clean solid. <a id="shopsite" href="https://unique-name27.github.io/frame-and-reed/" target="_blank" rel="noopener">Open this design on the live site</a> and save them from there.</p>
+        <div class="photo-row"><a id="order" class="btn primary" href="https://craftcloud3d.com/en/upload" target="_blank" rel="noopener">Save the print-shop files and open the marketplace</a></div>
         <p class="note" id="ordernote"></p>
       </details>
-      <p class="note">The STL is z-up, in millimetres, already sitting on the bed. Some styles come as more than one piece: the clamshell as a base and a lid in two files, the sliding cover as a plate laid out beside the case. The zip adds an OBJ with every part named and a text file of your settings. The harp and the felt are preview only, so they are not in the file.</p>
+      <p class="note">The STL is z-up, in millimetres, already sitting on the bed, and every piece in it is one closed solid. For your own printer the moving parts print in place, already assembled. Some styles come as more than one piece: the clamshell as a base and a lid in two files, the sliding cover as a plate laid out beside the case. The zip adds an OBJ with every part named and a text file of your settings. The harp and the felt are preview only, so they are not in the file.</p>
     </section>
   </div>
 

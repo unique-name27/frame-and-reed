@@ -9,9 +9,12 @@ const IMPORTMAP = `<script type="importmap">{"imports":{"three":"${CDN}/build/th
 function escapeScript(js) { return js.includes('</script') ? js.replace(/<\/script/g, '<\\/script') : js; }
 
 (async () => {
-  const common = { entryPoints: [path.join(__dirname, 'src/app.js')], bundle: true, minify: true, target: 'es2020', write: false, legalComments: 'none', logLevel: 'warning' };
+  // manifold-3d (the boolean union for clean print files) is carried inside the page as gzipped WebAssembly, since an
+  // artifact page may not fetch it; its Node-only branch is never reached in a browser
+  fs.writeFileSync(path.join(__dirname, 'src/manifold.wasm.gz'), require('zlib').gzipSync(fs.readFileSync(path.join(__dirname, 'node_modules/manifold-3d/manifold.wasm')), { level: 9 }));
+  const common = { entryPoints: [path.join(__dirname, 'src/app.js')], bundle: true, minify: true, target: 'es2022', write: false, legalComments: 'none', logLevel: 'warning', loader: { '.gz': 'binary' }, external: ['node:*'] };
   // published page: three.js comes from the CDN (allowed for artifacts), so the document is small and appears at once
-  const cdn = await esbuild.build({ ...common, format: 'esm', external: ['three', 'three/examples/jsm/*'] });
+  const cdn = await esbuild.build({ ...common, format: 'esm', external: ['three', 'three/examples/jsm/*', 'node:*'] });
   // local test page: everything inlined, for the sandbox, which cannot reach a CDN
   const inline = await esbuild.build({ ...common, format: 'esm' });
 

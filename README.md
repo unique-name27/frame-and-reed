@@ -12,6 +12,8 @@ Open [the page](https://unique-name27.github.io/frame-and-reed/), choose a harp 
 
 Seven ways of holding the harp, from nothing-to-break to most enclosed: cord lashing (two slots, you supply the cord), a sliding cover, turn-buttons on captive pegs, hidden blades driven from the side or from the top, a single spine bolt, and twin bolts. Everything prints without supports: the pads under the turn-buttons stand on small loose posts that you push out afterwards.
 
+**Having it printed by a shop:** use **No printer? Have one printed** rather than the ordinary download. It writes files made for a print bureau: each piece of the case as one closed solid in its own STL, with no parts printed inside other parts and no hollows that could trap resin. A shop can only make the designs held by cord lashing (one piece) or the sliding cover (case + cover); the latches, turn-buttons and bolts print already assembled inside the case, which works on your own printer but is not something a shop will take on.
+
 Cases are plain by default. Four optional patterns for the top of the case: Damascus steel, botanical scrollwork, a flowering vine, and Japanese seigaiha waves with sakura. Each is drawn fresh to fit the case's outline, and can be raised, engraved, or pierced right through as filigree (the clamshell lid, the sleeve roof and the pendant floor have open space beneath them to pierce). Choose **Filament** or **Resin** to size the detail for the printer; resin also widens the gap around the moving parts to 0.6 mm.
 
 ## Building it yourself
@@ -25,6 +27,7 @@ cp dist/site/index.html index.html
 ```
 
 - `src/engine.js` — the geometry: raster-mask 2D engine, the five case styles, the seven holds, the fit check and removal simulation, STL/OBJ export
+- `src/solid.js` — the print-file clean-up: a boolean union (manifold-3d, carried in the page as WebAssembly) that turns the overlapping slabs into one closed solid per piece
 - `src/decor.js` — the ornament: distance transforms, the vine-growing and blossom drawing, Damascus and seigaiha
 - `src/tracer.js` — photo outline tracer
 - `src/app.js` — the page logic, three.js stage, downloads

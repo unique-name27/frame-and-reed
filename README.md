@@ -8,7 +8,7 @@ The whole app is one static page, `index.html`, served straight from this reposi
 
 ## Using it
 
-Open [the page](https://unique-name27.github.io/frame-and-reed/), choose a harp (a stock size, or **Upload a photo of your harp**, taken from straight above, and type in its length), choose a case, and press **Download the STL**. Slice it flat on the bed, no supports, 0.4 mm nozzle, 0.2 mm layers. PLA is the safer first material.
+Open [the page](https://unique-name27.github.io/frame-and-reed/), choose a harp (a stock size, or **Upload a photo of your harp**, taken from straight above, and type in its length), choose a case, and press **Download the STL**. Slice it flat on the bed, no supports, 0.4 mm nozzle, 0.2 mm layers. PLA is the safer first material. Every length on the page can be shown in millimetres or inches; the switch is in the header, in the corner of the 3D view, and in the photo tracer, and they all flip together.
 
 Seven ways of holding the harp, from nothing-to-break to most enclosed: cord lashing (two slots, you supply the cord), a sliding cover, turn-buttons on captive pegs, hidden blades driven from the side or from the top, a single spine bolt, and twin bolts. Everything prints without supports: the pads under the turn-buttons stand on small loose posts that you push out afterwards.
 

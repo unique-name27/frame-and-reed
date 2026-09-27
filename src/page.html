@@ -116,6 +116,9 @@ details[open] summary::before{transform:rotate(45deg)}
 .btn:disabled{opacity:.5;cursor:default}
 .shopwarn{margin-top:12px;padding:10px 12px;border:1.5px solid var(--brass);background:color-mix(in srgb,var(--brass) 10%,var(--surface));font-size:13px;line-height:1.45}
 .shopwarn p{margin:0}
+.shopmat{margin-top:12px}
+.shopmat.need .seg{outline:2px solid var(--brass);outline-offset:2px}
+.shopmat .warnline{color:var(--brass);font-weight:600}
 .shopwarn .btn .sub{font-family:var(--mono);font-weight:400;font-size:11px;color:var(--muted)}
 .traced{display:none;margin-top:12px;padding:10px 12px;border-radius:6px;background:var(--accent-soft);font-size:13px;line-height:1.45}
 .traced.on{display:block}
@@ -324,6 +327,7 @@ summary{color:var(--ink);text-transform:uppercase;letter-spacing:.06em;font-size
           <p><b>A print shop can't make this one as it stands.</b> <span id="shopwhy"></span> For a shop, pick a way of holding the harp with nothing printed inside the case:</p>
           <div class="photo-row"><button id="shop-lash" class="btn" type="button">Cord lashing <span class="sub">one solid piece</span></button><button id="shop-slide" class="btn" type="button">Sliding cover <span class="sub">case + cover</span></button></div>
         </div>
+        <div class="field shopmat" id="shopmatf" hidden><div class="lbl">Material <span class="sub">pick one</span></div><div class="seg" id="shopmat" role="group" aria-label="Material the shop prints it in"></div><p class="note" id="shopmatnote" style="margin:8px 0 0"></p></div>
         <p class="shopwarn" id="shopnowasm" role="note" hidden><b>This copy of the page can't make print-shop files.</b> The site it is shown on blocks the WebAssembly that turns the model into one clean solid. <a id="shopsite" href="https://unique-name27.github.io/frame-and-reed/" target="_blank" rel="noopener">Open this design on the live site</a> and save them from there.</p>
         <div class="photo-row"><a id="order" class="btn primary" href="https://craftcloud3d.com/en/upload" target="_blank" rel="noopener">Save the print-shop files and open the marketplace</a></div>
         <p class="note" id="ordernote"></p>

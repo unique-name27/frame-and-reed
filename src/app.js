@@ -149,6 +149,7 @@ const HOLDS = [
 ];
 let style = 'deck', preset = 'bowM', shape = 'round', hold = 'bladeSide';
 let deco = 'none', cut = 'relief', proc = 'fdm', dseed = 1, finish = 'charcoal';
+let shopPicked = false; // the print shop's material has to be picked in the shop panel before its files are saved
 const DECOS = [
   ['none', 'Plain', 'Just the shell. Prints fastest.',
     '<svg viewBox="0 0 44 30" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="6" width="36" height="18" rx="5"/></svg>'],
@@ -212,11 +213,17 @@ DECOS.forEach(([k, n, d, svg]) => {
 });
 const segs = (el, list, get, set) => { list.forEach(([k, n, sub]) => { const b = document.createElement('button'); b.type = 'button'; b.dataset.k = k; b.innerHTML = n + (sub ? `<span class="sub">${sub}</span>` : ''); b.addEventListener('click', () => { set(k); rebuildUI(); }); el.appendChild(b); }); };
 segs($('cuts'), CUTS, () => cut, k => { cut = k; });
-segs($('procs'), PROCS, () => proc, k => {
+function setProc(k) {
   // resin fills narrow gaps, so the moving parts get the widest gap; back on filament, the usual one
   if (k === 'resin' && getv('pgap') < 0.55) setv('pgap', 0.6);
   if (k === 'fdm' && proc === 'resin' && getv('pgap') >= 0.6 - 1e-6) setv('pgap', 0.4);
   proc = k;
+}
+segs($('procs'), PROCS, () => proc, setProc);
+// the same setting, asked again in the print-shop panel as PLA or resin
+segs($('shopmat'), [['fdm', 'PLA', 'filament (FDM)'], ['resin', 'Resin', 'SLA / MSLA']], () => proc, k => {
+  setProc(k); shopPicked = true; $('shopmatf').classList.remove('need');
+  setStatus(k === 'resin' ? 'Print-shop files will be made for resin.' : 'Print-shop files will be made for PLA.');
 });
 $('reroll').addEventListener('click', () => { dseed = (dseed % 9973) + 1; rebuildUI(); });
 const finishEl = $('finish');
@@ -408,7 +415,7 @@ function readState(str) {
   $('roof').checked = Q.get('roof') !== '0';
   deco = DECOS.some(d => d[0] === Q.get('deco')) ? Q.get('deco') : 'none';
   cut = CUTS.some(d => d[0] === Q.get('cut')) ? Q.get('cut') : 'relief';
-  proc = PROCS.some(d => d[0] === Q.get('proc')) ? Q.get('proc') : 'fdm';
+  proc = PROCS.some(d => d[0] === Q.get('proc')) ? Q.get('proc') : 'fdm'; shopPicked = false; // a loaded design asks for the shop's material again
   dseed = Math.max(1, Math.min(9973, parseInt(Q.get('ds') || '1', 10) || 1));
   finish = FINISHES.some(d => d[0] === Q.get('fin')) ? Q.get('fin') : 'charcoal'; applyFinish();
   const tr = Q.get('tr'); let traced = false;
@@ -494,7 +501,10 @@ function buildPrintModel(shop) {
   // build() re-registers the clickable parts, the lid and the harp in the shared state; the print model is never shown,
   // so the on-screen ones are put back afterwards or the latches in the viewer would stop responding
   const keep = { buttons: state.buttons.slice(), lidGroup: state.lidGroup, harpGroup: state.harpGroup };
-  try { return build({ ...params(), harp: false, open: 0, printPose: true, shop: !!shop }).g; } // slide latches retracted, buttons locked, lid closed
+  // for a shop the cover is printed on its own and slid on afterwards, so its gap is a sliding fit for the material,
+  // not the print-in-place gap (which is 0.6 mm in resin, so liquid resin can drain out of it)
+  const fit = shop ? { gap: SHOP_FIT[proc === 'resin' ? 'resin' : 'fdm'] } : {};
+  try { return build({ ...params(), ...fit, harp: false, open: 0, printPose: true, shop: !!shop }).g; } // slide latches retracted, buttons locked, lid closed
   finally {
     state.locks.splice(0, state.locks.length, ...saved);
     state.buttons.splice(0, state.buttons.length, ...keep.buttons); state.lidGroup = keep.lidGroup; state.harpGroup = keep.harpGroup;
@@ -554,6 +564,28 @@ $('dl').addEventListener('click', async () => {
 // inside another. So a case for a shop has nothing printed in place: cord lashing (one solid piece) or the sliding
 // cover (the case and a separate plate). Everything else keeps its latches captive inside the case, which is fine on
 // your own printer and not something a shop will take on.
+// bring a note into view; on a phone the viewer stays pinned to the top of the screen, so the note goes just below it
+function reveal(el) {
+  const st = document.querySelector('.stage-wrap'), r = el.getBoundingClientRect();
+  const pinned = st && innerWidth <= 860 ? Math.max(0, st.getBoundingClientRect().bottom) : 0, top = pinned + 12;
+  if (r.top < top || r.bottom > innerHeight - 12) window.scrollBy({ top: r.top - top, behavior: reduced ? 'auto' : 'smooth' });
+}
+const SHOP_FIT = { fdm: 0.4, resin: 0.3 }; // play round the separately printed sliding cover, per side
+const MAT = { fdm: 'PLA', resin: 'resin' };
+// a filament printer cannot print filigree over the open pocket: the strands would hang in mid-air
+const plaFiligree = () => proc !== 'resin' && !!(lastReport && lastReport.checks.some(c => c.id === 'decor-fdm' && !c.ok));
+function renderShopMat() {
+  const f = $('shopmatf'); if (!f) return;
+  f.hidden = !shopReady();
+  [...$('shopmat').children].forEach(b => b.setAttribute('aria-pressed', String(shopPicked && b.dataset.k === proc)));
+  const n = $('shopmatnote');
+  if (!shopPicked) { n.textContent = 'The pattern\'s finest detail and the cover\'s fit are sized for the material, so the files wait until you pick.'; return; }
+  const r = proc === 'resin', parts = [];
+  if (deco !== 'none') parts.push(r ? `pattern detail down to ${L(0.5, 2)}` : `pattern detail no finer than ${L(0.85, 2)}, for a 0.4 mm nozzle`);
+  if (hold === 'slide') parts.push(`${L(SHOP_FIT[r ? 'resin' : 'fdm'], 2)} of play round the sliding cover`);
+  parts.push(r ? 'solid right through, nothing to hollow' : 'flat on the bed as it comes, no supports');
+  n.innerHTML = `Made for ${r ? 'resin' : 'PLA'}: ${parts.join('; ')}.` + (plaFiligree() ? ' <span class="warnline">The pierced pattern over the pocket would print in mid-air in PLA: pick resin, or cut the pattern as an engraving or in relief.</span>' : '');
+}
 const shopReady = () => (style === 'deck' || style === 'pendant') && (hold === 'lash' || hold === 'slide');
 function shopWhy() {
   const what = style === 'clam' ? 'The bolt on the lid prints inside its channel'
@@ -567,11 +599,13 @@ function renderOrderNote(P) {
   const ok = shopReady();
   if (warn) { warn.hidden = ok; $('shopwhy').textContent = ok ? '' : shopWhy(); }
   showNoWasm();
+  renderShopMat();
   const two = hold === 'slide';
   if (!ok) { note.innerHTML = ''; return; }
+  if (!shopPicked) { note.innerHTML = ''; return; }
   note.innerHTML = (proc === 'resin'
     ? '<b>What to choose there:</b> resin (SLA, DLP or MSLA), and a tough or ABS-like resin if they offer one — standard resin is brittle and a case gets dropped. It is a solid part with no hidden spaces: ask them not to hollow it.'
-    : '<b>What to choose there:</b> FDM in PLA or PETG at 0.2 mm layers is the cheapest; nylon (SLS or MJF) costs more and is close to unbreakable. Any of them prints it.')
+    : '<b>What to choose there:</b> FDM in PLA, 0.2 mm layers, 0.4 mm nozzle. It prints flat on the bed as the file sits, with no supports.')
     + (two ? ' The cover is its own file: upload both, as two parts of one order.' : '');
 }
 // The clean-up runs on WebAssembly. A page embedded by a host that forbids it cannot make shop files, so the panel
@@ -589,6 +623,7 @@ function checkSolid() {
 $('printfor').addEventListener('toggle', () => { if ($('printfor').open) checkSolid(); });
 window.__solidOK = () => solidOK;
 window.__shopFiles = () => shopFiles();
+window.__params = () => params();
 async function shopFiles() {
   const g = buildPrintModel(true), tag = fileTag();
   const { pieces, raw } = await solidPieces(printMeshes(g), THREE);
@@ -597,26 +632,41 @@ async function shopFiles() {
   const want = hold === 'slide' ? 2 : 1;
   if (keep.length !== want) throw new Error(`the model came out as ${keep.length} pieces instead of ${want}`);
   if (keep.some(q => surfaceCount(q) > 1)) throw new Error('the model has a closed space inside it');
-  const stls = keep.map((q, i) => [`${tag}-${i === 0 ? 'case' : 'cover'}.stl`, piecesToSTL([q], [], true)]);
-  return { g, tag, stls };
+  const mat = proc === 'resin' ? 'resin' : 'pla';
+  const stls = keep.map((q, i) => [`${tag}-${mat}-${i === 0 ? 'case' : 'cover'}.stl`, piecesToSTL([q], [], true)]);
+  return { g, tag: tag + '-' + mat, stls };
 }
 function shopZip(f) {
   const files = {}; f.stls.forEach(([n, buf]) => { files[n] = new Uint8Array(buf.slice(0)); });
   const card = ['JAW HARP CASE — FILES FOR A PRINT SHOP', '', ...f.stls.map(([n]) => n), '',
     'Each file is one closed, solid piece in millimetres: no loose parts, no parts printed inside other parts, no enclosed hollows.',
     f.stls.length > 1 ? 'The cover is a separate part that slides onto the case after printing.' : 'The case is a single part.', '',
+    proc === 'resin'
+      ? 'Made for resin (SLA / DLP / MSLA). A tough or ABS-like resin if you have one. Print it solid: please do not hollow it.'
+      : 'Made for PLA on an FDM printer: 0.2 mm layers, 0.4 mm nozzle, flat on the bed as it sits in the file, no supports.', '',
     'Design code: ' + designCode()].join('\n');
   return zipSync({ ...files, 'README.txt': strToU8(card) }, { level: 6 });
 }
 $('order').addEventListener('click', async e => {
   if (!shopReady()) {
     // nothing is saved and the marketplace does not open: a shop would hold this order
-    e.preventDefault(); $('shopwarn').hidden = false; $('shopwarn').scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
+    e.preventDefault(); $('shopwarn').hidden = false; reveal($('shopwarn'));
     setStatus('A print shop cannot make a case with latches printed inside it. Pick cord lashing or the sliding cover, then save again.', true);
     return;
   }
+  if (!shopPicked) {
+    e.preventDefault(); const f = $('shopmatf'); f.classList.add('need'); reveal(f);
+    $('shopmatnote').innerHTML = '<span class="warnline">Pick PLA or resin first.</span> The pattern\'s finest detail and the cover\'s fit are sized for the material.';
+    setStatus('Pick PLA or resin first: the files are made for the material the shop prints in.', true);
+    return;
+  }
+  if (plaFiligree()) {
+    e.preventDefault(); reveal($('shopmatf'));
+    setStatus('In PLA the pierced pattern over the pocket would print in mid-air. Pick resin, or cut the pattern as an engraving or in relief.', true);
+    return;
+  }
   if (solidOK === false) {
-    e.preventDefault(); showNoWasm(); $('shopnowasm').scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
+    e.preventDefault(); showNoWasm(); reveal($('shopnowasm'));
     setStatus('Print-shop files cannot be made on this copy of the page. Use the link to the live site above.', true);
     return;
   }
@@ -626,8 +676,8 @@ $('order').addEventListener('click', async e => {
     try {
       for (const [n, buf] of f.stls) await saveFile(n, buf.slice(0), 'model/stl');
       setStatus(f.stls.length > 1
-        ? 'Saved the case and the cover as two files, each one solid piece. Upload both — they are one case, quoted as two parts.'
-        : 'Saved as one solid piece. Upload it on the other tab.');
+        ? `Saved the case and the cover for ${MAT[proc]} as two files, each one solid piece. Upload both — they are one case, quoted as two parts.`
+        : `Saved for ${MAT[proc]} as one solid piece. Upload it on the other tab.`);
     } catch (err) {
       if (err && err.code === 'rejected_extension') {
         try { await saveFile(f.tag + '-print-shop.zip', shopZip(f), 'application/zip'); setStatus('This host saves the files as a zip — unzip it and upload the .stl files from inside.'); }

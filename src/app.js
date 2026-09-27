@@ -60,7 +60,7 @@ function setUnits(u, fromNative) {
   });
   const t = $('t-dist'); t.step = u === 'mm' ? '0.5' : '0.05'; t.value = u === 'mm' ? +tdMm.toFixed(1) : +(tdMm / IN).toFixed(2);
   document.querySelectorAll('.u-len').forEach(e => { e.textContent = u; });
-  document.querySelectorAll('#units button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.u === u)));
+  document.querySelectorAll('.units button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.u === u)));
   document.querySelectorAll('.len').forEach(e => { const vals = e.dataset.mm.split(',').map(Number), unit = units === 'mm' ? ' mm' : ' in';
     const one = v => units === 'mm' ? String(+v.toFixed(2)) : (v / IN).toFixed(v / IN < 0.1 ? 3 : v / IN < 10 ? 2 : 1);
     e.textContent = (e.dataset.pre || '') + vals.map(one).join(e.dataset.sep || ' × ') + unit; });
@@ -202,7 +202,13 @@ HOLDS.forEach(([k, n, d, svg]) => {
   b.addEventListener('click', () => { hold = k; rebuildUI(); });
   holdsEl.appendChild(b);
 });
-document.querySelectorAll('#units button').forEach(b => b.addEventListener('click', () => { if (b.dataset.u !== units) { setUnits(b.dataset.u); rebuild(); } }));
+// the mm / inches switch is in three places — the page header, the corner of the 3D view (which stays on screen as the
+// page scrolls), and the photo tracer — and they all flip the same setting
+document.querySelectorAll('.units button').forEach(b => b.addEventListener('click', () => {
+  if (b.dataset.u === units) return;
+  setUnits(b.dataset.u); rebuild();
+  $('t-dist').dispatchEvent(new Event('input')); // the tracer's "Outline measures …" line
+}));
 setUnits(units, true);
 const decosEl = $('decos');
 DECOS.forEach(([k, n, d, svg]) => {

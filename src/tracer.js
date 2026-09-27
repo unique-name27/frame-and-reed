@@ -31,7 +31,7 @@ function analyse(img) {
   const L0 = new Float32Array(n), S0 = new Float32Array(n);
   for (let i = 0; i < n; i++) { const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2], mx = Math.max(r, g, b), mn = Math.min(r, g, b); L0[i] = 0.299 * r + 0.587 * g + 0.114 * b; S0[i] = mx > 0 ? (mx - mn) / mx * 255 : 0; }
   const L = boxMean(L0, w, h, 1), S = boxMean(S0, w, h, 1);
-  const cands = [];
+  const cands = []; // (a slim khomus with its long reed tail is about 6 : 1, so only a thing thinner than 9 : 1 counts as a stray line)
   for (const [name, ch, pen] of [['L', L, 0], ['S', S, 0.03]]) {
     const t = otsu(ch), loc = boxMean(ch, w, h, Math.round(Math.min(100, Math.max(w, h) * 0.2)));
     cands.push({ name: name + ' global dark', pen, fg: ch.map(v => v < t ? 1 : 0) }, { name: name + ' global light', pen, fg: ch.map(v => v >= t ? 1 : 0) });
@@ -42,7 +42,7 @@ function analyse(img) {
     const m = closeMask(openMask(Uint8Array.from(cd.fg), w, h, 2), w, h, 3);
     const bl = largestBlob(m, w, h); if (!bl) continue;
     const area = bl.area / n, border = bl.border / (2 * w + 2 * h), cen = Math.hypot(bl.cx / w - 0.5, bl.cy / h - 0.5);
-    const score = border * 3 + 0.5 * cen + (area < 0.015 ? 0.3 : 0) + (area > 0.5 ? 0.6 : 0) - 0.08 * Math.min(bl.aspect, 4.5) + (bl.aspect > 6 ? 0.3 : 0) - 0.6 * Math.sqrt(area) + cd.pen;
+    const score = border * 3 + 0.5 * cen + (area < 0.015 ? 0.3 : 0) + (area > 0.5 ? 0.6 : 0) - 0.08 * Math.min(bl.aspect, 4.5) + (bl.aspect > 9 ? 0.3 : 0) - 0.6 * Math.sqrt(area) + cd.pen;
     results.push({ score, name: cd.name, mask: bl.mask, stats: bl });
   }
   results.sort((p, q) => p.score - q.score);
@@ -69,6 +69,19 @@ function morph(m, w, h, r, isMax) { // separable square min/max filter
 }
 const openMask = (m, w, h, r) => morph(morph(m, w, h, r, false), w, h, r, true);
 const closeMask = (m, w, h, r) => morph(morph(m, w, h, r, true), w, h, r, false);
+const GROW = 2;
+// grow a mask by a round brush of radius r pixels (squared distance to the nearest set pixel within the brush)
+function grow(m, w, h, r) {
+  const out = new Uint8Array(w * h), R = Math.ceil(r), r2 = r * r + 1e-6, offs = [];
+  for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) if (dx * dx + dy * dy <= r2) offs.push(dx, dy);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (!m[y * w + x]) continue;
+    // only edge pixels spread (an inside pixel's brush lands on pixels that are set already)
+    if (x > 0 && y > 0 && x < w - 1 && y < h - 1 && m[y * w + x - 1] && m[y * w + x + 1] && m[(y - 1) * w + x] && m[(y + 1) * w + x]) { out[y * w + x] = 1; continue; }
+    for (let k = 0; k < offs.length; k += 2) { const xx = x + offs[k], yy = y + offs[k + 1]; if (xx >= 0 && yy >= 0 && xx < w && yy < h) out[yy * w + xx] = 1; }
+  }
+  return out;
+}
 function largestBlob(fg, w, h) {
   const lab = new Int32Array(w * h).fill(-1); let best = null, nl = 0; const stack = [];
   for (let i = 0; i < fg.length; i++) {
@@ -89,13 +102,22 @@ function detect() {
   const { w, h, s, results, pick } = T.det;
   if (!results.length) { T.outline = []; T.scale = []; return; }
   const r = results[pick % results.length], bl = r.stats;
-  const px = rdp(traceMask(r.mask, w, h), 1.6);
-  T.outline = px.map(p => [(p[0] + 0.5) / s, (p[1] + 0.5) / s]);
-  // long axis of the blob; the ends are the outline points that reach furthest along it
-  const mx = bl.cx, my = bl.cy, ux = Math.cos(bl.ang), uy = Math.sin(bl.ang);
-  let lo = 1e9, hi = -1e9, plo = px[0], phi = px[0];
-  for (const p of px) { const t = (p[0] - mx) * ux + (p[1] - my) * uy; if (t < lo) { lo = t; plo = p; } if (t > hi) { hi = t; phi = p; } }
-  const A = [(plo[0] + 0.5) / s, (plo[1] + 0.5) / s], B = [(phi[0] + 0.5) / s, (phi[1] + 0.5) / s];
+  // The line goes round the OUTSIDE of the harp. A threshold puts the edge in the middle of the photo's soft edge
+  // (and a lit bevel along the frame reads as background), the trace runs through the centres of the edge pixels, and
+  // straightening it cuts corners on the round bow — each of which puts the line a little inside the metal, and a case
+  // made from it pinches. So the blob is grown by GROW pixels first, and the straightening is kept fine.
+  const G = window.__traceGrow ?? GROW, E = window.__traceEps ?? 1.0;
+  T.outline = rdp(traceMask(G > 0 ? grow(r.mask, w, h, G) : r.mask, w, h), E).map(p => [(p[0] + 0.5) / s, (p[1] + 0.5) / s]);
+  // The two ends come from the harp itself, not the grown line: the typed length runs from end to end of the metal,
+  // and ends placed on a line drawn outside it would make the harp a little longer on the photo than it is, and so
+  // scale everything else down.
+  const px = traceMask(r.mask, w, h);
+  // long axis of the blob; each end is the middle of the edge that reaches furthest along it (a square-cut tail gives
+  // its centre, not a corner, which would tilt the axis), set half a pixel out to the outer edge of that pixel
+  const mx = bl.cx, my = bl.cy, ux = Math.cos(bl.ang), uy = Math.sin(bl.ang), along = p => (p[0] - mx) * ux + (p[1] - my) * uy;
+  let lo = 1e9, hi = -1e9; for (const p of px) { const t = along(p); lo = Math.min(lo, t); hi = Math.max(hi, t); }
+  const endAt = (t0, dir) => { let sx = 0, sy = 0, n = 0; for (const p of px) if (Math.abs(along(p) - t0) <= 1.5) { sx += p[0]; sy += p[1]; n++; } const cx = sx / n, cy = sy / n, dt = t0 - along([cx, cy]) + dir * 0.5; return [(cx + dt * ux + 0.5) / s, (cy + dt * uy + 0.5) / s]; };
+  const A = endAt(lo, -1), B = endAt(hi, 1);
   // arm tips first: the narrower end. Compare the blob's width over the outer third at each end.
   const width = (t0, t1) => { let a = 1e9, b = -1e9; for (const p of px) { const t = (p[0] - mx) * ux + (p[1] - my) * uy; if (t >= t0 && t <= t1) { const v = -(p[0] - mx) * uy + (p[1] - my) * ux; a = Math.min(a, v); b = Math.max(b, v); } } return b - a; };
   // The bow is the widest part of any jaw harp and sits at one end; the tips (and trigger) are at the other. Find the
@@ -270,10 +292,12 @@ function scaleOk() {
 function axisMap() {
   const [a, b] = T.scale, pxLen = Math.hypot(b[0] - a[0], b[1] - a[1]), k = (+$('t-dist').value * (state.units === 'mm' ? 1 : IN)) / pxLen; // the length box is in the page's units
   const u = [(b[0] - a[0]) / pxLen, (b[1] - a[1]) / pxLen], v = [-u[1], u[0]];
+  T.axis = { a, u, v, k }; // kept, so the outline can be drawn back over the photo
   return p => ({ x: ((p[0] - a[0]) * v[0] + (p[1] - a[1]) * v[1]) * k, z: ((p[0] - a[0]) * u[0] + (p[1] - a[1]) * u[1]) * k });
 }
 function commit(outline, trigger) {
   const bb = bboxOf(outline), mz = (bb.minZ + bb.maxZ) / 2, mx = (bb.minX + bb.maxX) / 2;
+  T.centre = { mx, mz };
   state.trace = { outline: outline.map(p => ({ x: p.x - mx, z: p.z - mz })), trigger: { x: 0, z: trigger.z - mz } };
   showTracer(false);
   if (onDone) onDone();
@@ -289,7 +313,25 @@ function finishAuto() {
     const p = pts[i], q = pts[(i + 1) % N], segs = Math.max(1, Math.ceil(Math.hypot(q.x - p.x, q.z - p.z) / (step / 2)));
     for (let s = 0; s <= segs; s++) { const t = s / segs, x = p.x + (q.x - p.x) * t, z = p.z + (q.z - p.z) * t, b = Math.min(n - 1, Math.max(0, Math.round((z - bb.minZ) / step))); if (x >= 0) wR[b] = Math.max(wR[b], x); else wL[b] = Math.max(wL[b], -x); }
   }
-  const w = new Float32Array(n); for (let i = 0; i < n; i++) { const r = wR[i], l = wL[i]; w[i] = r >= 0 && l >= 0 ? (r + l) / 2 : Math.max(r, l, 0); }
+  // Symmetrising. The two ends are placed by eye (or found from the blob), so the line between them can sit a little
+  // off the harp's centre, or lean; and a photo lit from one side has a shadow on that side. Where both sides were
+  // found, (right − left) / 2 is how far off-centre the line is there. A straight line fitted through that (twice,
+  // the second time without the worst tenth, where the photo fooled the trace) is the error in the axis, and comes
+  // out. Each half-width is then the WIDER of the two corrected sides — not their average, which took half of any
+  // miss on one side into the case — so the case is made for the harp wherever the photo shows it widest.
+  const zs = [], cs = []; for (let i = 0; i < n; i++) if (wR[i] >= 0 && wL[i] >= 0) { zs.push(i); cs.push((wR[i] - wL[i]) / 2); }
+  let fa = 0, fb = 0;
+  const fitLine = idx => { let S = 0, Sz = 0, Sc = 0, Szz = 0, Szc = 0; for (const k of idx) { const z = zs[k], c = cs[k]; S++; Sz += z; Sc += c; Szz += z * z; Szc += z * c; } const D = S * Szz - Sz * Sz; if (S < 2 || Math.abs(D) < 1e-9) { fa = S ? Sc / S : 0; fb = 0; } else { fb = (S * Szc - Sz * Sc) / D; fa = (Sc - fb * Sz) / S; } };
+  if (zs.length >= 4) {
+    const all = zs.map((_, k) => k); fitLine(all);
+    const res = all.map(k => Math.abs(cs[k] - (fa + fb * zs[k]))), cut = [...res].sort((a, b) => a - b)[Math.floor(res.length * 0.9)];
+    fitLine(all.filter(k => res[k] <= cut));
+  }
+  const w = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const c = zs.length >= 4 ? fa + fb * i : 0, r = wR[i] >= 0 ? wR[i] - c : -1, l = wL[i] >= 0 ? wL[i] + c : -1;
+    w[i] = Math.max(r, l, 0);
+  }
   for (let i = 1; i < n - 1; i++) if (w[i] <= 0) { let j = i + 1; while (j < n && w[j] <= 0) j++; const a = w[i - 1], b2 = j < n ? w[j] : a; for (let k = i; k < j; k++) w[k] = a + (b2 - a) * (k - i + 1) / (j - i + 1); }
   const outline = []; for (let i = 0; i < n; i++) outline.push({ x: Math.max(0, w[i]), z: bb.minZ + i * step }); for (let i = n - 1; i >= 0; i--) outline.push({ x: -Math.max(0, w[i]), z: bb.minZ + i * step });
   outline[0].x = 0; outline[n - 1].x = 0; outline[n].x = 0; outline[2 * n - 1].x = 0;

@@ -38,6 +38,8 @@ h1,h2,h3{margin:0;font-weight:400;text-wrap:balance}
 .mast .brand em{font-style:italic;color:var(--accent)}
 .mast .tag{font-family:var(--serif);font-style:italic;font-size:19px;color:var(--muted)}
 .mast .units{flex:0 0 auto}
+.units.mini{display:inline-flex;flex:0 0 auto;border-radius:5px}
+.units.mini button{flex:0 0 auto;padding:4px 10px;font-size:12px;font-family:var(--mono)}
 .mast .units button{flex:0 0 auto;padding:5px 12px;font-size:13px}
 .mast .meta{font-family:var(--mono);font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
 
@@ -347,7 +349,7 @@ summary{color:var(--ink);text-transform:uppercase;letter-spacing:.06em;font-size
     </div>
     <div class="hudfoot">
       <div class="hud bl"><button id="reset" class="chip btn" type="button">Reset view</button><button id="demo" class="chip btn" type="button">How it comes out</button></div>
-      <div class="hud br"><div id="dims"></div></div>
+      <div class="hud br"><span class="seg units mini" role="group" aria-label="Units"><button type="button" data-u="mm">mm</button><button type="button" data-u="in">in</button></span><div id="dims"></div></div>
     </div>
   </div>
 </main>
@@ -379,7 +381,7 @@ summary{color:var(--ink);text-transform:uppercase;letter-spacing:.06em;font-size
   </div>
   <div>
     <h3>Printing it</h3>
-    <p>Slice it as it comes: flat on the bed, no supports, 0.4 mm nozzle, 0.2 mm layers. At that layer height the 0.4 mm print gap works out to exactly two layers of air above and below anything that moves. Leave the slicer's union of overlapping shells switched on. It is the default in PrusaSlicer, Bambu Studio and Cura, and the file counts on it.</p>
+    <p>Slice it as it comes: flat on the bed, no supports, 0.4 mm nozzle, 0.2 mm layers. At that layer height the <span class="len" data-mm="0.4">0.4 mm</span> print gap works out to exactly two layers of air above and below anything that moves. Every piece in the file is already one closed solid, so there is nothing to repair or merge in the slicer.</p>
     <p>Print the first one in PLA. PETG likes to weld itself across small gaps and you can end up with a latch that never frees; if you want PETG anyway, set the print gap to <span class="len" data-mm="0.5"></span> first. A latch that will not shift usually just needs a firmer push, since the first movement has to break the print skin.</p>
     <p>The clamshell prints as a base and a lid, and a short piece of 1.75 mm filament through the hinge knuckles, snipped flush, is the pin. The sliding cover prints flat beside the case and slides in afterwards. Cord lashing needs about <span class="len" data-mm="300"></span> of <span class="alt" data-mm="2 to 3 mm" data-in="3/32 to 1/8 in"></span> cord, or shock cord if you would rather it snapped back.</p>
     <p>A design code is the whole design as one line of text, traced outline and all. Paste someone else's in and you get their case.</p>
@@ -392,7 +394,7 @@ summary{color:var(--ink);text-transform:uppercase;letter-spacing:.06em;font-size
     <span class="tstep" id="t-step"></span>
     <span class="thint" id="t-hint"></span>
     <span id="t-detect"><button id="t-alt" class="btn" type="button">Try another outline</button></span>
-    <label class="dist" id="t-scale-wrap">Harp length <input id="t-dist" class="text" type="number" step="0.05" value="4"> <span class="u-len">in</span> <span id="t-meas" class="sub" aria-live="polite"></span></label>
+    <span class="dist" id="t-scale-wrap"><label for="t-dist">Harp length</label> <input id="t-dist" class="text" type="number" step="0.05" value="4"> <span class="seg units mini" role="group" aria-label="Units"><button type="button" data-u="mm">mm</button><button type="button" data-u="in">in</button></span> <span id="t-meas" class="sub" aria-live="polite"></span></span>
     <button id="t-swap" class="btn" type="button" hidden>Swap ends</button>
     <button id="t-hand" class="btn ghost" type="button">Trace by hand</button>
     <button id="t-undo" class="btn ghost" type="button">Undo</button>

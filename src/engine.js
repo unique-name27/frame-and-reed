@@ -2,6 +2,7 @@
 // Units: mm inside build(); the returned group is scaled ×0.001 to metres. x across, z along (trigger toward +z), y up.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
 import { DECO, makeDRaster, clearD, mmSpace, pxSpace, readD, edt, erodeM, dilateM, andM, countM, patternInk } from './decor.js';
 
 export const IN = 25.4;
@@ -669,6 +670,7 @@ export function build(P) {
     ({ hL, hW, frameT, span, reedW, zRing, zNeck, zTip, armL, trigger, framePrims, harpPrims, bayPrims, holePrims, windows, zBack } = hp); bowB = hp.b;
   }
   const traced = !!(trace && style !== 'multi');
+  if (style === 'easel' || style === 'easels') return buildEasel(P, { traced, trace, harpPrims, framePrims, frameT, frameH, reedW, trigger, zBack, hW, span, zNeck, zRing, zTip, tH, armL });
   const nb = style === 'multi' ? P.bays : 1, pitch = hW + 2 * clr + Math.max(wall + 3, 2 * (headR + gap + 1)); // the web between bays must hold the shared turn-button's head chamber with a real wall either side
   const offs = Array.from({ length: nb }, (_, i) => (i - (nb - 1) / 2) * pitch);
   const webHalf = (pitch - hW - 2 * clr) / 2; // rack: from a shared pivot to either pocket edge
@@ -1024,8 +1026,27 @@ export function build(P) {
 
   // the harp itself (visual only)
   if (P.harp) offs.forEach((dx, bi) => {
-    const h = new THREE.Group(); h.name = 'jaw-harp' + (nb > 1 ? '-' + (bi + 1) : '');
-    const y0 = floorT + raise + feltT + 0.05, reedT = 0.9;
+    const h = harpModel({ traced, trace, R, frameT, frameH, reedW, trigger, zBack, framePrims, hW, span, zNeck, zRing, tH, armL, y0: floorT + raise + feltT + 0.05 });
+    h.name = 'jaw-harp' + (nb > 1 ? '-' + (bi + 1) : '');
+    h.position.x = dx; g.add(h); if (bi === 0) state.harpGroup = h;
+  });
+
+  // mm -> metres for the preview. Sliding parts carry their two stop positions in userData, so those are millimetres
+  // too and have to come along, or the viewer animates them a thousand times too far.
+  g.traverse(o => {
+    if (o !== g) o.position.multiplyScalar(0.001);
+    if (o.isMesh) o.geometry.scale(0.001, 0.001, 0.001);
+    if (o.userData && o.userData.slide) { o.userData.base *= 0.001; o.userData.open *= 0.001; }
+  });
+  const report = fitReport({ decoNotes, P, style, traced, trace, hb0, pb, zStep, zRoof, slideOut, trigger, tH, frameH, frameT, clr, floorT, feltT, Dlow, D, roofed, zRing, bowB, pocketMask, harpPocketMask, bayX, R, zc, holdKind });
+  return { g, dims: { L: ob.maxZ - ob.minZ, W: ob.maxX - ob.minX, D: style === 'clam' ? D + 3 : D }, report };
+}
+
+// The harp itself, for the preview only: frame, reed, rivet block and trigger, lying flat with its underside at y0
+// (x across, z along with the trigger toward +z, y up). Never printed.
+function harpModel({ traced, trace, R, frameT, frameH, reedW, trigger, zBack, framePrims, hW, span, zNeck, zRing, tH, armL, y0 }) {
+  const h = new THREE.Group(); h.name = 'jaw-harp';
+  const reedT = 0.9;
     if (traced) {
       const bb = bboxOf(trace.outline);
       const tips = trace.outline.filter(p => p.z > bb.maxZ - 3), tipHalf = tips.reduce((m, p) => Math.max(m, Math.abs(p.x)), 0);
@@ -1058,18 +1079,160 @@ export function build(P) {
     const curl = new THREE.Mesh(new THREE.TorusGeometry(curlR, reedT / 2, 8, 32, Math.PI * 0.9), mats.ti);
     curl.rotation.y = Math.PI / 2; curl.scale.set(1, 1, reedW / reedT);
     curl.position.set(trigger.x, tTop, trigger.z + 1.5); curl.name = 'trigger-curl'; h.add(curl);
-    h.position.x = dx; g.add(h); if (bi === 0) state.harpGroup = h;
-  });
+  return h;
+}
 
-  // mm -> metres for the preview. Sliding parts carry their two stop positions in userData, so those are millimetres
-  // too and have to come along, or the viewer animates them a thousand times too far.
-  g.traverse(o => {
-    if (o !== g) o.position.multiplyScalar(0.001);
-    if (o.isMesh) o.geometry.scale(0.001, 0.001, 0.001);
-    if (o.userData && o.userData.slide) { o.userData.base *= 0.001; o.userData.open *= 0.001; }
+// ---------------- easel stands: one harp, or a row of them, standing up on a shelf ----------------
+// The harp stands bow down on a ledge and leans back against two legs that touch its frame either side of the reed —
+// never the reed itself — like a picture on an easel. The stand is one solid built from straight convex pieces (the legs,
+// a panel under the ledge with an A-shaped opening, the ledge and its lip, a gabled head, a back leg and a floor rail),
+// and it prints standing up exactly as it stands on the shelf, with no supports: the legs lean back by the lean angle,
+// the back leg 20°, and everything that reaches out over air does it at 45° or steeper, or bridges a short gap.
+// Everything is laid out in the plane the harp leans on: x across, u up that plane, v out of it toward the viewer.
+export const EASEL = { legW: 5, legT: 4.5, headH: 8, gableH: 5, yLed: 26, lipT: 2.4, lipH: 3.5, frontH: 4, sillH: 3, railH: 3.5, backLean: 20, gapHarps: 12, postW: 4 };
+function convexPart(pts, name, mat = mats.body) {
+  const m = new THREE.Mesh(new ConvexGeometry(pts.map(p => new THREE.Vector3(p[0], p[1], p[2]))), mat); m.name = name; return m;
+}
+function buildEasel(P, H) {
+  const E = EASEL, multi = P.style === 'easels', n = multi ? Math.max(2, Math.min(6, Math.round(+P.eaN || 3))) : 1;
+  const lean = Math.max(8, Math.min(25, +P.lean || 15)), th = THREE.MathUtils.degToRad(lean), sn = Math.sin(th), cs = Math.cos(th);
+  const phi = THREE.MathUtils.degToRad(E.backLean);
+  const g = new THREE.Group(); g.name = 'jaw-harp-easel'; state.lidGroup = null; state.harpGroup = null; state.buttons.length = 0;
+  const inch = P.units === 'in', U = (mm, d = 1) => { const v = +mm; if (!inch) return `${v.toFixed(d)} mm`; const i = v / IN; return `${i.toFixed(Math.abs(i) < 0.1 ? 3 : 2)} in`; };
+  // the harp, lying flat in its own frame (x across, z along, trigger toward +z)
+  const hPrims = H.traced ? [{ poly: H.trace.outline }] : H.harpPrims;
+  const hb = bboxOf(hPrims.flatMap(p => p.poly));
+  const zMin = hb.minZ, zMax = Math.max(hb.maxZ, H.trigger.z + 5), hLen = zMax - zMin, hW = Math.max(-hb.minX, hb.maxX) * 2;
+  const R = makeRaster({ minX: hb.minX, maxX: hb.maxX, minZ: zMin, maxZ: zMax }, 6);
+  const outM = maskOf(R, H.traced ? hPrims : H.framePrims, 0);
+  const halfW = z => { const py = Math.round((z - R.z0) / RES); if (py < 0 || py >= R.h) return 0; let a = 1e9, b = -1e9; for (let x = 0; x < R.w; x++) if (outM[py * R.w + x]) { a = Math.min(a, x); b = Math.max(b, x); } return b < a ? 0 : Math.max(Math.abs(R.x0 + a * RES), Math.abs(R.x0 + (b + 1) * RES)); };
+  const frameH = H.frameH, reedHalf = H.traced ? 2 : H.reedW / 2;
+  // the plane the harp leans on: the ledge's back corner at height yLed, leaning back by `lean`
+  const O = [0, E.yLed, 0];
+  const W = (x, u, v) => [x, O[1] + u * cs + v * sn, O[2] - u * sn + v * cs];
+  const uF = v => -(O[1] + v * sn) / cs; // where a line up the plane at depth v meets the floor
+  // the legs: straight, each touching the frame about 1 mm in from the harp's edge at the bow and along the arms, and
+  // kept at least 1.5 mm clear of the reed all the way up
+  const u1 = H.zRing - zMin, zArm = H.traced ? zMin + 0.72 * hLen : zMin + 0.8 * ((H.zTip ?? zMin + 0.75 * hLen) - zMin), u2 = zArm - zMin;
+  const w1 = halfW(H.zRing), w2 = halfW(zArm), xMin = reedHalf + 1.5 + E.legW / 2;
+  const x1 = Math.max(xMin, w1 - E.legW / 2 - 0.8), x2 = Math.max(xMin, w2 - E.legW / 2 - 0.8);
+  const uHeadTop = hLen + 5 + E.headH, uLegTop = uHeadTop - E.headH / 2;
+  let k = u2 > u1 + 5 ? (x2 - x1) / (u2 - u1) : 0;
+  if (x1 + k * (uLegTop - u1) < xMin) k = (xMin - x1) / (uLegTop - u1);
+  const xAt = u => x1 + k * (u - u1);
+  const pitch = hW + E.gapHarps, offs = Array.from({ length: n }, (_, i) => (i - (n - 1) / 2) * pitch);
+  // the ledge: its top square to the leaning plane, deep enough for the bow end of the harp, a lip in front, and a 45°
+  // underside back to the panel below it
+  const ledgeD = frameH + 1.2 + 1.5, Vf = ledgeD + E.lipT;
+  const tCh = Vf / (sn + cs), uB = -E.frontH - tCh * (cs - sn); // the 45° underside meets the leaning plane at u = uB
+  const Fb = W(0, -E.frontH, Vf);
+  const endHalf = u => Math.max(xAt(u) + E.legW / 2, hW / 2 + 3);
+  const xL = offs[0] - endHalf(0) - 1, xR = offs[n - 1] + endHalf(0) + 1;
+  const parts = [];
+  const add = (pts, name) => { const m = convexPart(pts, name); parts.push(m); g.add(m); return m; };
+  const trayPts = [], lipPts = [];
+  for (const x of [xL, xR]) {
+    trayPts.push(W(x, 0, -0.4), W(x, 0, Vf), W(x, -E.frontH, Vf), [x, Fb[1] - tCh, Fb[2] - tCh], W(x, uB, -0.4));
+    lipPts.push(W(x, -0.3, ledgeD), W(x, -0.3, Vf), W(x, E.lipH, Vf), W(x, E.lipH, ledgeD));
+  }
+  add(trayPts, 'ledge'); add(lipPts, 'ledge-lip');
+  // below the ledge each pair of legs carries on down to the floor, splayed out for a wider stance, and a gusset under
+  // the ledge ties each leg in to the middle: the opening between them comes to a point under the ledge with sides
+  // steep enough (50°) to print over. A rail on the floor joins the feet.
+  const vB = -E.legT, uT = -0.6, uApex = uB - 1.5;
+  const footX = Math.max(xAt(uF(0)) + 2, hW / 2 + 6); // centre of each foot on the floor
+  const lowX = u => { const f = uF(0), t = uT; return xAt(t) + (footX - xAt(t)) * (u - t) / (f - t); }; // lower leg centre line
+  const kOpen = Math.tan(THREE.MathUtils.degToRad(40)); // across per unit down along the opening's sides (50° from flat)
+  offs.forEach((cx, i) => [-1, 1].forEach(s => {
+    const leg = [];
+    for (const v of [vB, 0]) { const f = uF(v); for (const e of [-1, 1]) leg.push(W(cx + s * (lowX(f) + e * E.legW / 2), f, v), W(cx + s * (xAt(uT) + e * E.legW / 2), uT, v)); }
+    add(leg, 'lower-leg');
+    // the gusset: from under the middle of the ledge out to the leg, its lower edge rising at 50° toward the middle
+    // (where the gusset's lower edge meets the leg's inner edge; if the 50° line reaches the floor first, the gusset
+    // stands on the floor between the two)
+    let um = null;
+    for (let u = uApex; u > uF(vB) + 0.5; u -= 0.25) if ((uApex - u) * kOpen >= lowX(u) - E.legW / 2 + 0.6) { um = u; break; }
+    const gus = [];
+    for (const v of [vB, 0.3]) {
+      gus.push(W(cx - s * 0.3, uT, v), W(cx - s * 0.3, uApex, v), W(cx + s * (xAt(uT) - E.legW / 2 + 0.6), uT, v));
+      if (um !== null) gus.push(W(cx + s * (lowX(um) - E.legW / 2 + 0.6), um, v));
+      else { const f = uF(v); gus.push(W(cx + s * (uApex - f) * kOpen, f, v), W(cx + s * (lowX(f) - E.legW / 2 + 0.6), f, v)); }
+    }
+    add(gus, 'gusset');
+  }));
+  { // the front floor rail, foot to foot
+    const x0 = offs[0] - footX - E.legW / 2, x3 = offs[n - 1] + footX + E.legW / 2;
+    const zb = W(0, uF(vB), vB)[2] - 0.2, zf = W(0, uF(0), 0)[2] + 0.2, pts = [];
+    for (const x of [x0, x3]) for (const z of [zb, zf]) pts.push([x, 0, z], [x, E.railH, z]);
+    add(pts, 'front-rail');
+  }
+  // the legs, from inside the ledge up into the head
+  offs.forEach(cx => [-1, 1].forEach(s => {
+    const pts = [];
+    for (const u of [uT - 1.5, uLegTop]) for (const v of [vB, 0]) for (const e of [-1, 1]) pts.push(W(cx + s * (xAt(u) + e * E.legW / 2), u, v));
+    add(pts, 'leg');
+  }));
+  // the head: a gable over each harp, on a rail when there are several
+  const hx = xAt(uLegTop) + E.legW / 2 + 2, headL = offs[0] - hx, headR = offs[n - 1] + hx, headPts = [];
+  for (const x of [headL, headR]) for (const v of [vB, 0]) headPts.push(W(x, uHeadTop - E.headH, v), W(x, uHeadTop, v));
+  add(headPts, 'head');
+  offs.forEach(cx => { const pts = []; for (const v of [vB, 0]) pts.push(W(cx - hx, uHeadTop - 0.3, v), W(cx + hx, uHeadTop - 0.3, v), W(cx, uHeadTop + E.gableH, v)); add(pts, 'gable'); });
+  // back legs: from the back of the head down to the floor, 20° from upright, each tied to the panel by a floor rail
+  const backXs = n === 1 ? [0] : n >= 5 ? [offs[0], 0, offs[n - 1]] : [offs[0], offs[n - 1]];
+  const d = [0, -Math.cos(phi), -Math.sin(phi)], pp = [0, -Math.sin(phi), Math.cos(phi)];
+  const zPanelFront = W(0, uF(0), 0)[2];
+  let zFootMin = 0;
+  backXs.forEach(xb => {
+    const T = W(xb, uHeadTop - E.headH / 2, vB / 2), pts = [];
+    for (const a of [-1, 1]) for (const b of [-1, 1]) {
+      const c = [T[0] + a * E.legW / 2, T[1] + b * pp[1] * E.legT / 2, T[2] + b * pp[2] * E.legT / 2];
+      const t = c[1] / -d[1]; pts.push(c, [c[0], 0, c[2] + t * d[2]]);
+    }
+    add(pts, 'back-leg');
+    const zFoot = Math.min(...pts.filter(q => q[1] === 0).map(q => q[2])); zFootMin = Math.min(zFootMin, zFoot);
+    const rp = []; for (const x of [xb - E.legW / 2, xb + E.legW / 2]) for (const z of [zFoot + 0.5, zPanelFront - 0.5]) rp.push([x, 0, z], [x, E.railH, z]);
+    add(rp, 'floor-rail');
   });
-  const report = fitReport({ decoNotes, P, style, traced, trace, hb0, pb, zStep, zRoof, slideOut, trigger, tH, frameH, frameT, clr, floorT, feltT, Dlow, D, roofed, zRing, bowB, pocketMask, harpPocketMask, bayX, R, zc, holdKind });
-  return { g, dims: { L: ob.maxZ - ob.minZ, W: ob.maxX - ob.minX, D: style === 'clam' ? D + 3 : D }, report };
+  // the harps (preview only)
+  if (P.harp) offs.forEach((cx, i) => {
+    const model = harpModel({ traced: H.traced, trace: H.trace, R, frameT: H.frameT, frameH, reedW: H.reedW, trigger: H.trigger, zBack: H.zBack, framePrims: H.framePrims, hW: H.hW, span: H.span, zNeck: H.zNeck, zRing: H.zRing, tH: H.tH, armL: H.armL, y0: 0 });
+    const wrap = new THREE.Group(); wrap.name = 'jaw-harp' + (n > 1 ? '-' + (i + 1) : ''); wrap.add(model);
+    const M = new THREE.Matrix4().makeBasis(new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, sn, cs), new THREE.Vector3(0, cs, -sn));
+    wrap.quaternion.setFromRotationMatrix(M);
+    const at = W(cx, 0.15, 0.15); wrap.position.set(at[0], at[1] - zMin * cs, at[2] + zMin * sn);
+    g.add(wrap); if (i === 0) state.harpGroup = wrap;
+  });
+  // size, and whether it stands: the easel's own weight (PLA, about 60 % solid as printed) and the harp's (steel)
+  const box = new THREE.Box3(); parts.forEach(m => { m.geometry.computeBoundingBox(); box.union(m.geometry.boundingBox); });
+  let vol = 0; const cen = new THREE.Vector3(), a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  parts.forEach(m => { const pos = m.geometry.attributes.position; for (let i = 0; i < pos.count; i += 3) { a.fromBufferAttribute(pos, i); b.fromBufferAttribute(pos, i + 1); c.fromBufferAttribute(pos, i + 2); const v6 = a.dot(new THREE.Vector3().crossVectors(b, c)); vol += v6 / 6; cen.addScaledVector(new THREE.Vector3().add(a).add(b).add(c), v6 / 24); } });
+  if (vol > 0) cen.multiplyScalar(1 / vol);
+  let frameArea = 0; for (let i = 0; i < outM.length; i++) frameArea += outM[i]; frameArea *= RES * RES * (H.traced ? 0.45 : 1);
+  const mEasel = vol * 1.24e-3 * 0.6, mHarp = frameArea * frameH * 7.85e-3 * n;
+  const hc = W(0, 0.45 * hLen, frameH / 2), zCom = (cen.z * mEasel + hc[2] * mHarp) / (mEasel + mHarp);
+  const margin = zPanelFront - zCom, reach = zCom - zFootMin;
+  // how close the legs come to the reed, and whether they meet the frame along the arms
+  let clear = 1e9; for (let u = 0; u <= hLen; u += 2) clear = Math.min(clear, xAt(u) - E.legW / 2 - reedHalf);
+  const meets = xAt(u2) - E.legW / 2 < w2 - 0.5 && xAt(u1) - E.legW / 2 < w1 - 0.5;
+  const dims = { L: box.max.x - box.min.x, W: box.max.z - box.min.z, D: box.max.y - box.min.y };
+  const bridge = Math.max(2 * (xAt(uLegTop) - E.legW / 2), n > 1 ? pitch - 2 * xAt(uLegTop) - E.legW : 0);
+  const checks = [], chk = (id, ok, level, text) => checks.push({ id, ok, level: ok ? 'ok' : level, text });
+  chk('lean', clear >= 1, 'bad', clear >= 1
+    ? `${n > 1 ? 'Each harp leans' : 'The harp leans'} back ${lean}° against two legs that touch its frame either side of the reed and stay ${U(clear)} clear of the reed itself.`
+    : `The legs come within ${U(Math.max(0, clear))} of the reed, and would press on it. This harp's arms are too close together for the legs.`);
+  chk('frame', meets, 'warn', meets ? 'The legs meet the frame at the bow and along the arms, so the harp rests square against them.'
+    : 'The legs miss the arms of this harp over part of their length (it is very narrow there), so it rests on the bow and the arm tips only.');
+  chk('ledge', true, 'ok', `${n > 1 ? 'Each bow stands' : 'The bow stands'} on a ledge ${U(ledgeD)} deep, square to the lean, with a ${U(E.lipH)} lip in front so it cannot slide off.`);
+  chk('stable', margin > 5 && reach > 10, 'bad', margin > 5 && reach > 10
+    ? `Stands firm with ${n > 1 ? 'the harps' : 'the harp'} on it: the weight sits ${U(margin)} behind the front edge, and the back leg reaches ${U(reach)} behind it.`
+    : `With ${n > 1 ? 'the harps' : 'the harp'} on it the weight sits only ${U(Math.max(0, margin))} inside the front edge: it could tip forward. Lean it back further.`);
+  const big = Math.max(dims.L, dims.W, dims.D);
+  chk('bed', big <= 250, 'warn', big <= 250 ? `${U(dims.L, 0)} wide, ${U(dims.W, 0)} deep, ${U(dims.D, 0)} tall: fits the bed of most printers.`
+    : `${U(dims.L, 0)} wide, ${U(dims.W, 0)} deep, ${U(dims.D, 0)} tall: bigger than most printer beds (about ${U(250, 0)}). ${n > 1 ? 'Put fewer harps on it' : 'Print it on a bigger printer'}, or send it to a print shop.`);
+  chk('print', bridge <= 40, 'warn', `Prints standing up, just as it stands, with no supports: the legs lean ${lean}°, the back leg ${E.backLean}°, the ledge has a 45° underside, and the widest gap it bridges is ${U(bridge)}.`);
+  chk('shop', true, 'ok', 'One solid piece with nothing printed inside it, so a print shop can make it as it is.');
+  g.traverse(o => { if (o !== g) o.position.multiplyScalar(0.001); if (o.isMesh) o.geometry.scale(0.001, 0.001, 0.001); });
+  return { g, dims, report: { checks, easel: { n, lean, margin, reach, clear, bridge, ledgeD } } };
 }
 
 // ---- the four ways of holding the harp in an open deck: slide latches in tunnels or roofed channels ----

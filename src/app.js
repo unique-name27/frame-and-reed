@@ -101,7 +101,7 @@ class Stage {
   frame(keepDir) {
     const box = new THREE.Box3().setFromObject(this.obj), s = new THREE.Sphere(); box.getBoundingSphere(s);
     const d = s.radius / Math.sin(THREE.MathUtils.degToRad(this.camera.fov / 2)) * 1.0;
-    const dir = keepDir ? this.camera.position.clone().sub(this.controls.target).normalize() : new THREE.Vector3(-0.55, 0.62, 0.85).normalize();
+    const dir = keepDir ? this.camera.position.clone().sub(this.controls.target).normalize() : (this.viewDir || new THREE.Vector3(-0.55, 0.62, 0.85)).clone().normalize();
     this.framedR = s.radius;
     this.controls.target.copy(s.center);
     this.camera.position.copy(s.center).add(dir.multiplyScalar(d));
@@ -128,6 +128,10 @@ const STYLES = [
     '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M6 27h40v5H6z"/><path d="M6 27V19h40v8"/><path d="M46 19l6-14h-30l-4 8" /><circle cx="46" cy="19" r="2.2"/></svg>'],
   ['pendant', 'Pendant', 'The deck with windows cut in the floor so the harp shows through. For wearing on a cord.', '',
     '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 30h36v4H12z"/><path d="M14 30V19h32v11"/><path d="M14 19c0-3 3-4 6-4h6v15"/><path d="M28 30v4M40 30v4" opacity=".4"/><path d="M12 22H8c-3 0-4-2-4-4v-5" stroke-linecap="round"/><circle cx="4" cy="11" r="2.2"/></svg>'],
+  ['easel', 'Easel stand', 'Shows one harp off on a shelf. It stands bow down on a ledge and leans back against two legs that touch only the frame.', '',
+    '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><path d="M21 34L28 4l7 30"/><path d="M28 5l11 29" opacity=".45"/><path d="M15 24h26v3H15z"/><circle cx="28" cy="17.5" r="3.4"/><path d="M26.3 14.6L27.2 8M29.7 14.6L28.8 8"/></svg>'],
+  ['easels', 'Easel for several', 'The same easel made long: two to six harps in a row, each in its own bay under a shared top rail.', '',
+    '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><path d="M5 7h46"/><path d="M9 34l5-27 5 27M23 34l5-27 5 27M37 34l5-27 5 27"/><path d="M4 24h48v3H4z"/></svg>'],
   ['multi', 'Collector rack', 'Two to five pockets in a row, sharing turn-buttons between neighbours. For a shelf or a gig bag.', '',
     '<svg viewBox="0 0 56 36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M4 26h48v5H4z"/><path d="M6 26V15h44v11"/><path d="M6 15c0-3 2-4 5-4h5v15M20 11h6v15M36 11h4v15"/><path d="M11 20h4M23 20h6M41 20h4" stroke-width="3" stroke-linecap="round"/></svg>'],
 ];
@@ -183,6 +187,7 @@ Object.entries(PRESETS).forEach(([k, p]) => {
   b.addEventListener('click', () => { applyPreset(k); state.trace = null; setTraced(false); rebuildUI(); });
   presetsEl.appendChild(b);
 });
+const isEasel = () => style === 'easel' || style === 'easels';
 const DIMS = ['len', 'wid', 'span', 'arm', 'trig', 'tail', 'thick'];
 function applyPreset(k) { const p = PRESETS[k]; if (!p) return; preset = k; shape = p.shape; DIMS.forEach(id => { setv(id, p[id] ?? (id === 'thick' ? 4 : 0)); }); }
 function syncPresets() { [...presetsEl.children].forEach(b => b.setAttribute('aria-pressed', String(!state.trace && b.dataset.k === preset))); }
@@ -244,8 +249,8 @@ function syncDeco() {
   $('deco-hint').textContent = deco === 'none' ? '' : 'Same pattern, a new drawing.';
 }
 
-const ids = ['len', 'wid', 'span', 'trig', 'thick', 'arm', 'tail', 'hood', 'wall', 'clr', 'pgap', 'bays', 'open'];
-const fmt = { ...Object.fromEntries(LEN_IDS.map(id => [id, v => fmtLen(id, v)])), hood: v => v + ' %', bays: v => v + '', open: v => v + '°' };
+const ids = ['len', 'wid', 'span', 'trig', 'thick', 'arm', 'tail', 'hood', 'wall', 'clr', 'pgap', 'bays', 'open', 'lean', 'eaN'];
+const fmt = { ...Object.fromEntries(LEN_IDS.map(id => [id, v => fmtLen(id, v)])), hood: v => v + ' %', bays: v => v + '', open: v => v + '°', lean: v => v + '°', eaN: v => v + '' };
 
 function setTraced(on) {
   document.querySelectorAll('.param').forEach(el => el.hidden = on);
@@ -261,6 +266,7 @@ function rebuildUI() {
   clearTimeout(busyT); busyT = setTimeout(() => { try { rebuild(); } finally { boot.hidden = true; } }, 40);
 }
 const setStatus = (msg, err) => { const s = $('status'); s.textContent = msg; s.classList.toggle('err', !!err); };
+let lastEasel = false; const HINT_CASE = $('hint').textContent;
 let first = true, current = null, lastDims = null, lastReport = null, lastOpen = 0, lastStyle = '';
 function params() {
   const P = { style, shape, hold, deco, cut, proc, dseed, harp: $('harp').checked, bail: $('bail').checked, roof: $('roof').checked, mono: '', accentHex: '#d8b064' };
@@ -276,6 +282,9 @@ function rebuild(draft) {
   document.querySelectorAll('.only-clam').forEach(el => el.hidden = style !== 'clam');
   document.querySelectorAll('.only-roof').forEach(el => el.hidden = !(style === 'deck' || style === 'pendant' || style === 'multi'));
   document.querySelectorAll('.only-hold').forEach(el => el.hidden = !(style === 'deck' || style === 'pendant'));
+  document.querySelectorAll('.only-easel').forEach(el => el.hidden = !isEasel());
+  document.querySelectorAll('.only-easels').forEach(el => el.hidden = style !== 'easels');
+  document.querySelectorAll('.only-case').forEach(el => el.hidden = isEasel());
   if (style !== lastStyle) { state.locks.fill(true); lastStyle = style; }
   if (style === 'clam') { if (P.open > 5) state.locks[0] = false; else if (lastOpen > 5) state.locks[0] = true; }
   lastOpen = style === 'clam' ? P.open : 0;
@@ -284,7 +293,11 @@ function rebuild(draft) {
   try { ({ g, dims, report } = build(P)); }
   catch (e) { console.error(e); setStatus('That combination could not be built (' + (e.message || e) + '). The previous case is still shown — try a different setting.', true); return false; }
   current = g; lastDims = dims; lastReport = report; window.__scene = g; window.__report = report; window.__engine = { toSTL, toOBJ, build, THREE, state, printMeshes, solidPieces, piecesToSTL, surfaceCount, manifoldReady }; window.__stage = stage;
-  stage.setObject(g, !first);
+  // a stand is seen from the front, a little to one side; a case from above
+  const easelNow = isEasel(), turned = easelNow !== lastEasel; lastEasel = easelNow;
+  stage.viewDir = easelNow ? new THREE.Vector3(-0.34, 0.26, 1) : null;
+  stage.setObject(g, !first && !turned);
+  $('hint').textContent = easelNow ? 'Drag to spin it around. The harp stands bow down on the ledge and leans back against the two legs.' : HINT_CASE;
   first = false;
   const dv = v => units === 'mm' ? v.toFixed(0) : (v / IN).toFixed(2);
   $('dims').innerHTML = `<b>${dv(dims.L)} × ${dv(dims.W)} × ${dv(dims.D)} ${units === 'mm' ? 'mm' : 'in'}</b><br>outside`;
@@ -294,7 +307,9 @@ function rebuild(draft) {
   const holdName = { bladeSide: 'two hidden blades (side thumbs)', bladeTop: 'two hidden blades (top sliders)', spine: 'a spine bolt at the cord end', twin: 'twin bolts across the bow', lash: 'a cord of your own through the lash slots', slide: 'a cover that slides over the bow', swing: 'two turn-buttons' }[hold];
   const held = { deck: holdName + (P.roof ? ' and the hood roof' : ', with open walls round the reed tip'), sleeve: 'a turn-button gate at the mouth', clam: 'a hinged lid with a sliding bolt', pendant: holdName + ' over a windowed floor', multi: 'shared turn-buttons' }[style];
   const dName = deco === 'none' ? '' : `, ${{ relief: 'raised', engrave: 'engraved', pierce: 'pierced' }[cut]} ${{ damascus: 'Damascus', scroll: 'scrollwork', flowers: 'flowering vine', seigaiha: 'seigaiha waves' }[deco]}`;
-  $('summary').innerHTML = `<em>${sName}</em> for ${harpName}${style === 'multi' ? ` × ${P.bays}` : ''}, held by ${held}${P.bail ? ', with a bail' : ''}${dName}.`;
+  $('summary').innerHTML = isEasel()
+    ? (style === 'easels' ? `<em>Easel</em> for ${P.eaN} × ${harpName}, leaning back ${P.lean}°.` : `<em>${sName}</em> for ${harpName}, leaning back ${P.lean}°.`)
+    : `<em>${sName}</em> for ${harpName}${style === 'multi' ? ` × ${P.bays}` : ''}, held by ${held}${P.bail ? ', with a bail' : ''}${dName}.`;
   document.querySelectorAll('.only-buttons').forEach(el => el.hidden = state.buttons.length === 0); // cord lashing has nothing to latch
   renderFit(report); renderOrderNote(P); stopDemo();
   writeHash(); syncBox();
@@ -391,6 +406,8 @@ function designCode() {
   q.set('style', style); if (preset && !state.trace) q.set('preset', preset); q.set('shape', shape); q.set('hold', hold);
   ['len', 'wid', 'span', 'arm', 'trig', 'thick', 'tail', 'hood', 'wall', 'clr', 'pgap'].forEach(id => q.set(id, String(+getv(id).toFixed(4))));
   if (style === 'multi') q.set('bays', $('bays').value);
+  if (isEasel()) q.set('lean', $('lean').value);
+  if (style === 'easels') q.set('eaN', $('eaN').value);
   if (style === 'clam') q.set('open', $('open').value);
   if (!P.bail) q.set('bail', '0');
   if (!P.roof) q.set('roof', '0');
@@ -413,7 +430,7 @@ function readState(str) {
   if (!(Q.has('style') || Q.has('len') || Q.has('preset'))) return false;
   if (Q.get('style') && STYLES.some(s => s[0] === Q.get('style'))) style = Q.get('style');
   applyPreset(Q.get('preset') || (preset || 'bowM'));
-  ['len', 'wid', 'span', 'arm', 'trig', 'thick', 'tail', 'hood', 'wall', 'clr', 'pgap', 'bays', 'open'].forEach(id => { if (Q.get(id) !== null && !isNaN(+Q.get(id))) setv(id, +Q.get(id)); });
+  ['len', 'wid', 'span', 'arm', 'trig', 'thick', 'tail', 'hood', 'wall', 'clr', 'pgap', 'bays', 'open', 'lean', 'eaN'].forEach(id => { if (Q.get(id) !== null && !isNaN(+Q.get(id))) setv(id, +Q.get(id)); });
   if (Q.get('shape') && SHAPE_KEYS.includes(Q.get('shape'))) shape = Q.get('shape');
   if (Q.get('hold') && HOLDS.some(h => h[0] === Q.get('hold'))) hold = Q.get('hold');
   if (customised()) preset = '';
@@ -476,6 +493,17 @@ $('untrace').addEventListener('click', () => { state.trace = null; setTraced(fal
 const holdName2 = () => HOLDS.find(h => h[0] === hold)[1];
 function settingsCard() {
   const P = params(), sName = STYLES.find(s => s[0] === style)[1];
+  if (isEasel()) return [
+    'JAW HARP CASE GENERATOR — EASEL STAND', '',
+    `Style        ${sName}${style === 'easels' ? ` · ${P.eaN} harps` : ''} · leaning back ${P.lean}°`,
+    `Harp         ${state.trace ? 'traced from a photo' : (PRESETS[preset] && !customised() ? PRESETS[preset].name : 'custom, ' + shape + ' bow')} · ${fmtLen('len', P.len)} × ${fmtLen('wid', P.wid)}, frame ${fmtLen('thick', P.thick)} thick`,
+    `Stand        ${L(lastDims.L)} wide × ${L(lastDims.W)} deep × ${L(lastDims.D)} tall`,
+    `Printed in   ${proc === 'resin' ? 'resin (SLA / MSLA): a tough or ABS-like resin, not standard, which is brittle' : 'filament (FDM)'}`, '',
+    `${fileTag()}.stl   one solid piece, z-up, millimetres. Print it standing up exactly as it stands on the shelf, no supports: the legs lean back ${P.lean}°, the back leg 20°, and the ledge has a 45° underside.`,
+    'case.obj     the same parts named (case.mtl), y-up, millimetres.',
+    'The harp is preview only and is not in these files. Stand the harp bow down on the ledge, reed facing out, and let it lean back against the two legs.', '',
+    'Design code (paste it under "Load a design code" to reopen this exact stand): ' + designCode(),
+  ].join('\n');
   return [
     'JAW HARP CASE GENERATOR', '',
     `Style        ${sName}${(style === 'deck' || style === 'pendant') ? ' · held by ' + holdName2() : ''}`,
@@ -500,7 +528,7 @@ function settingsCard() {
     'Design code (paste it under "Load a design code" to reopen this exact case): ' + designCode(),
   ].join('\n');
 }
-const fileTag = () => `jaw-harp-case-${style}-${state.trace ? 'traced' : (preset || shape)}`;
+const fileTag = () => `jaw-harp-${isEasel() ? (style === 'easels' ? 'easel-x' + Math.round(getv('eaN')) : 'easel') : 'case-' + style}-${state.trace ? 'traced' : (preset || shape)}`;
 // the print files: STL(s) for the slicer, and — on request — everything as one zip
 function buildPrintModel(shop) {
   const saved = state.locks.slice(); state.locks.fill(true); // print pose: every button locked (detent engaged), lid closed, no harp
@@ -587,12 +615,13 @@ function renderShopMat() {
   const n = $('shopmatnote');
   if (!shopPicked) { n.textContent = 'The pattern\'s finest detail and the cover\'s fit are sized for the material, so the files wait until you pick.'; return; }
   const r = proc === 'resin', parts = [];
-  if (deco !== 'none') parts.push(r ? `pattern detail down to ${L(0.5, 2)}` : `pattern detail no finer than ${L(0.85, 2)}, for a 0.4 mm nozzle`);
-  if (hold === 'slide') parts.push(`${L(SHOP_FIT[r ? 'resin' : 'fdm'], 2)} of play round the sliding cover`);
-  parts.push(r ? 'solid right through, nothing to hollow' : 'flat on the bed as it comes, no supports');
+  if (deco !== 'none' && !isEasel()) parts.push(r ? `pattern detail down to ${L(0.5, 2)}` : `pattern detail no finer than ${L(0.85, 2)}, for a 0.4 mm nozzle`);
+  if (withCover()) parts.push(`${L(SHOP_FIT[r ? 'resin' : 'fdm'], 2)} of play round the sliding cover`);
+  parts.push(r ? 'solid right through, nothing to hollow' : isEasel() ? 'standing up as it comes, no supports' : 'flat on the bed as it comes, no supports');
   n.innerHTML = `Made for ${r ? 'resin' : 'PLA'}: ${parts.join('; ')}.` + (plaFiligree() ? ' <span class="warnline">The pierced pattern over the pocket would print in mid-air in PLA: pick resin, or cut the pattern as an engraving or in relief.</span>' : '');
 }
-const shopReady = () => (style === 'deck' || style === 'pendant') && (hold === 'lash' || hold === 'slide');
+const shopReady = () => isEasel() || ((style === 'deck' || style === 'pendant') && (hold === 'lash' || hold === 'slide'));
+const withCover = () => (style === 'deck' || style === 'pendant') && hold === 'slide'; // the one shop design that comes as two pieces
 function shopWhy() {
   const what = style === 'clam' ? 'The bolt on the lid prints inside its channel'
     : style === 'sleeve' ? 'The gate prints on a captive peg inside the case'
@@ -606,12 +635,12 @@ function renderOrderNote(P) {
   if (warn) { warn.hidden = ok; $('shopwhy').textContent = ok ? '' : shopWhy(); }
   showNoWasm();
   renderShopMat();
-  const two = hold === 'slide';
+  const two = withCover();
   if (!ok) { note.innerHTML = ''; return; }
   if (!shopPicked) { note.innerHTML = ''; return; }
   note.innerHTML = (proc === 'resin'
     ? '<b>What to choose there:</b> resin (SLA, DLP or MSLA), and a tough or ABS-like resin if they offer one — standard resin is brittle and a case gets dropped. It is a solid part with no hidden spaces: ask them not to hollow it.'
-    : '<b>What to choose there:</b> FDM in PLA, 0.2 mm layers, 0.4 mm nozzle. It prints flat on the bed as the file sits, with no supports.')
+    : `<b>What to choose there:</b> FDM in PLA, 0.2 mm layers, 0.4 mm nozzle. It prints ${isEasel() ? 'standing up' : 'flat on the bed'} as the file sits, with no supports.`)
     + (two ? ' The cover is its own file: upload both, as two parts of one order.' : '');
 }
 // The clean-up runs on WebAssembly. A page embedded by a host that forbids it cannot make shop files, so the panel
@@ -635,18 +664,18 @@ async function shopFiles() {
   const { pieces, raw } = await solidPieces(printMeshes(g), THREE);
   if (raw.length) throw new Error('part of the model is not a closed solid (' + raw.map(r => r.name).join(', ') + ')');
   const keep = pieces.filter(q => q.volume > 1); // under a cubic millimetre is a sliver where two faces met, not a piece
-  const want = hold === 'slide' ? 2 : 1;
+  const want = withCover() ? 2 : 1;
   if (keep.length !== want) throw new Error(`the model came out as ${keep.length} pieces instead of ${want}`);
   if (keep.some(q => surfaceCount(q) > 1)) throw new Error('the model has a closed space inside it');
   const mat = proc === 'resin' ? 'resin' : 'pla';
-  const stls = keep.map((q, i) => [`${tag}-${mat}-${i === 0 ? 'case' : 'cover'}.stl`, piecesToSTL([q], [], true)]);
+  const stls = keep.map((q, i) => [`${tag}-${mat}-${isEasel() ? 'stand' : i === 0 ? 'case' : 'cover'}.stl`, piecesToSTL([q], [], true)]);
   return { g, tag: tag + '-' + mat, stls };
 }
 function shopZip(f) {
   const files = {}; f.stls.forEach(([n, buf]) => { files[n] = new Uint8Array(buf.slice(0)); });
   const card = ['JAW HARP CASE — FILES FOR A PRINT SHOP', '', ...f.stls.map(([n]) => n), '',
     'Each file is one closed, solid piece in millimetres: no loose parts, no parts printed inside other parts, no enclosed hollows.',
-    f.stls.length > 1 ? 'The cover is a separate part that slides onto the case after printing.' : 'The case is a single part.', '',
+    f.stls.length > 1 ? 'The cover is a separate part that slides onto the case after printing.' : isEasel() ? 'The stand is a single part. It prints standing up, as it stands, with no supports.' : 'The case is a single part.', '',
     proc === 'resin'
       ? 'Made for resin (SLA / DLP / MSLA). A tough or ABS-like resin if you have one. Print it solid: please do not hollow it.'
       : 'Made for PLA on an FDM printer: 0.2 mm layers, 0.4 mm nozzle, flat on the bed as it sits in the file, no supports.', '',

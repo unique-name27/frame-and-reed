@@ -274,12 +274,14 @@ summary{color:var(--ink);text-transform:uppercase;letter-spacing:.06em;font-size
     </section>
 
     <section class="step" id="s2">
-      <h2><span class="num">02</span>The case</h2>
-      <p class="lede">The pocket is the same in all of them. What changes is the shell, and how the harp is held in it.</p>
+      <h2><span class="num">02</span>Case or stand</h2>
+      <p class="lede">Five cases and two stands. The pocket is the same in every case; what changes is the shell, and how the harp is held in it. The stands show a harp off on a shelf.</p>
       <div class="styles" id="styles"></div>
       <div class="field only-multi" hidden><label for="bays">Harps in the rack <output id="o-bays"></output></label><input id="bays" type="range" min="2" max="5" step="1" value="3"></div>
+      <div class="field only-easel" hidden><label for="lean">Lean <span class="sub">back from upright</span> <output id="o-lean"></output></label><input id="lean" type="range" min="8" max="25" step="1" value="15"></div>
+      <div class="field only-easels" hidden><label for="eaN">Harps on the easel <output id="o-eaN"></output></label><input id="eaN" type="range" min="2" max="6" step="1" value="3"></div>
       <div class="field only-hold" hidden><div class="lbl">How the harp is held</div><div class="styles" id="holds"></div></div>
-      <details>
+      <details class="only-case">
         <summary>Fine-tune the case</summary>
         <label class="toggle"><input id="bail" type="checkbox" checked> Necklace bail</label>
         <label class="toggle only-roof"><input id="roof" type="checkbox" checked> Roof over the reed tip <span class="sub">holds the tip end down</span></label>
@@ -293,18 +295,19 @@ summary{color:var(--ink);text-transform:uppercase;letter-spacing:.06em;font-size
       <div class="fit" id="fit" aria-live="polite">
         <div class="fit-head"><span class="lbl">Fit check</span><span id="fit-sum" class="mono"></span></div>
         <ul id="fitlist"></ul>
-        <p class="note" style="margin-top:8px">These run again every time something changes. The last one walks the harp back out of the case, point by point: it is easy to draw a case that traps the harp and hard to spot by eye. Press <b>How it comes out</b> to watch it.</p>
+        <p class="note only-case" style="margin-top:8px">These run again every time something changes. The last one walks the harp back out of the case, point by point: it is easy to draw a case that traps the harp and hard to spot by eye. Press <b>How it comes out</b> to watch it.</p>
       </div>
     </section>
 
     <section class="step" id="s3">
       <h2><span class="num">03</span>Decoration</h2>
       <p class="lede">A pattern for the top of the case. Each one is drawn fresh to fit your case's outline, so a different size gets a different drawing.</p>
-      <div class="decos" id="decos"></div>
+      <p class="note only-easel" hidden>The patterns are cut into the top of a case. The easels print plain.</p>
+      <div class="only-case"><div class="decos" id="decos"></div>
       <div class="only-deco" hidden>
         <div class="field"><div class="lbl">Cut</div><div class="seg" id="cuts" role="group" aria-label="How the pattern is cut"></div></div>
         <div class="photo-row"><button id="reroll" class="btn" type="button">Draw it again</button><span class="note" style="margin:0" id="deco-hint"></span></div>
-      </div>
+      </div></div>
       <div class="field"><div class="lbl">Printed in</div><div class="seg" id="procs" role="group" aria-label="Printing process"></div></div>
       <div class="field"><div class="lbl">Preview colour <span class="sub">the file itself has no colour</span></div><div class="sw" id="finish"></div></div>
     </section>
@@ -376,6 +379,7 @@ summary{color:var(--ink);text-transform:uppercase;letter-spacing:.06em;font-size
       <dt>Sleeve gate</dt><dd>captive turn-button at the mouth</dd>
       <dt>Lid latch</dt><dd><span class="len" data-mm="5,3"></span> sliding bolt in a roofed channel, <span class="len" data-mm="6"></span> throw into a keeper tunnel</dd>
       <dt>Hinge</dt><dd>5 knuckles, <span class="len" data-mm="6.4" data-pre="Ø"></span> on a shelf, <span class="len" data-mm="2" data-pre="Ø"></span> bore, 1.75 mm filament pin</dd>
+      <dt>Easel</dt><dd><span class="len" data-mm="5,4.5"></span> legs leaning back 15° (8°–25°) · ledge <span class="len" data-mm="26"></span> up with a <span class="len" data-mm="3.5"></span> lip · back leg at 20°</dd>
       <dt>Bail</dt><dd><span class="len" data-mm="6.5" data-pre="Ø"></span> hole, <span class="len" data-mm="5"></span> rim</dd>
     </dl>
   </div>
@@ -384,6 +388,7 @@ summary{color:var(--ink);text-transform:uppercase;letter-spacing:.06em;font-size
     <p>Slice it as it comes: flat on the bed, no supports, 0.4 mm nozzle, 0.2 mm layers. At that layer height the <span class="len" data-mm="0.4">0.4 mm</span> print gap works out to exactly two layers of air above and below anything that moves. Every piece in the file is already one closed solid, so there is nothing to repair or merge in the slicer.</p>
     <p>Print the first one in PLA. PETG likes to weld itself across small gaps and you can end up with a latch that never frees; if you want PETG anyway, set the print gap to <span class="len" data-mm="0.5"></span> first. A latch that will not shift usually just needs a firmer push, since the first movement has to break the print skin.</p>
     <p>The clamshell prints as a base and a lid, and a short piece of 1.75 mm filament through the hinge knuckles, snipped flush, is the pin. The sliding cover prints flat beside the case and slides in afterwards. Cord lashing needs about <span class="len" data-mm="300"></span> of <span class="alt" data-mm="2 to 3 mm" data-in="3/32 to 1/8 in"></span> cord, or shock cord if you would rather it snapped back.</p>
+    <p>The easels print standing up, exactly as they stand on the shelf, with no supports: the legs lean back, the back leg leans the other way, and the ledge has a 45° underside. Stand the harp bow down on the ledge with the reed facing out and let it lean back; the two legs touch only the frame, either side of the reed.</p>
     <p>A design code is the whole design as one line of text, traced outline and all. Paste someone else's in and you get their case.</p>
   </div>
 </section>
